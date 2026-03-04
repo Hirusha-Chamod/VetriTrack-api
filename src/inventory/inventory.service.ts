@@ -41,4 +41,41 @@ export class InventoryService {
     }
     return batch;
   }
+
+  // Updates the minimum stock threshold (Owner-only feature)
+  async updateReorderLevel(itemId: string, minLevel: number) {
+    const item = await this.itemModel.findByIdAndUpdate(
+      itemId,
+      { minStockLevel: minLevel },
+      { new: true }
+    );
+    if (!item) throw new NotFoundException('Item not found');
+    return item;
+  }
+
+  // Logic for Low Stock Alert: 'Current ≤ Min Level'
+  async getLowStockAlerts() {
+    // This aggregates total stock across all batches for each item
+    return await this.batchModel.aggregate([
+      { $group: { _id: '$itemId', totalStock: { $sum: '$quantityOnHand' } } },
+      {
+        $lookup: {
+          from: 'inventoryitems',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'itemDetails'
+        }
+      },
+      { $unwind: '$itemDetails' },
+      {
+        $project: {
+          itemName: '$itemDetails.itemName',
+          totalStock: 1,
+          minLevel: '$itemDetails.minStockLevel',
+          isLow: { $lte: ['$totalStock', '$itemDetails.minStockLevel'] }
+        }
+      },
+      { $match: { isLow: true } }
+    ]);
+  }
 }
