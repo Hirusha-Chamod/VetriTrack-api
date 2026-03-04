@@ -3,17 +3,21 @@ import { IsNotEmpty, IsString, IsNumber, IsDateString, Min } from 'class-validat
 export class AddBatchDto {
   @IsNotEmpty()
   @IsString()
-  itemId!: string; // Reference to the InventoryItem ID
+  itemId!: string; // Reference to the parent InventoryItem
 
   @IsNotEmpty()
   @IsString()
-  batchCode!: string;
+  batchCode!: string; // Unique identifier for the batch
 
   @IsNotEmpty()
   @IsDateString()
-  expiryDate!: string; // Must be a valid ISO date string
+  expiryDate!: string; // ISO format date for FEFO sorting
 
   @IsNumber()
   @Min(1)
-  quantityOnHand!: number;
+  quantityOnHand!: number; // Starting stock amount
+
+  @IsNotEmpty()
+  @IsString()
+  supplier!: string; // Source of the stock (e.g., 'VetMed Inc')
 }

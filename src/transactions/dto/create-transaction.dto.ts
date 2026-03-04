@@ -1,22 +1,23 @@
-import { IsNotEmpty, IsString, IsNumber, IsEnum, Min } from 'class-validator';
+import { IsNotEmpty, IsString, IsNumber, IsEnum, Min, IsOptional } from 'class-validator';
 
 export class CreateTransactionDto {
   @IsNotEmpty()
   @IsString()
-  itemId!: string;
+  itemId!: string; // The product being moved
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  batchId!: string;
+  batchId?: string; // Specific batch (Optional for FEFO which auto-selects)
 
   @IsNotEmpty()
   @IsEnum(['ISSUE', 'RECEIVE', 'ADJUSTMENT'])
-  type!: string;
+  type!: string; // Matches your three UI cards
 
   @IsNumber()
   @Min(1)
-  quantity!: number;
+  quantity!: number; // Amount being moved or adjusted
 
+  @IsOptional()
   @IsString()
-  reason?: string;
+  reason?: string; // e.g., "Damaged goods" or "Monthly count"
 }

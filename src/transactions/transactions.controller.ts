@@ -11,7 +11,6 @@ export class TransactionsController {
   // Handles 'Receive Stock' and 'Issue Stock (FEFO)'
   @Post()
   create(@Body() createDto: CreateTransactionDto, @Req() req: any) {
-    // req.user.id comes from the JWT Strategy we built earlier
     return this.transactionsService.create(createDto, req.user.id);
   }
 

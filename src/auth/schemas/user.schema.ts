@@ -1,24 +1,28 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
 
-
 @Schema({ timestamps: true })
 export class User extends Document {
   @Prop({ required: true })
-  fullName: string;
+  fullName!: string;
 
   @Prop({ unique: true, required: true })
-  username: string;
+  username!: string;
 
-  @Prop({ required: true })
-  password: string;
+  @Prop({ unique: true, required: true })
+  email!: string; 
 
-  // Enforces roles 
-  @Prop({ required: true, enum: ['staff', 'manager'], default: 'staff' })
-  role: string;
+  @Prop({ required: true, select: false }) // select: false hides password from standard queries
+  password!: string;
 
-  @Prop({ default: 'active' })
-  status: string;
+  @Prop({ required: true, enum: ['staff', 'owner'], default: 'staff' })
+  role!: string;
+
+  @Prop({ required: true, enum: ['active', 'inactive'], default: 'active' })
+  status!: string;
+
+  @Prop()
+  lastLogin?: Date; 
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

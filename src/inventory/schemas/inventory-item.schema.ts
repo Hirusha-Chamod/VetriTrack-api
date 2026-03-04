@@ -13,7 +13,7 @@ export class InventoryItem extends Document {
   unitOfMeasure!: string;
 
   @Prop({ required: true, default: 0 })
-  minStockLevel!: number; // R04: Reorder threshold
+  minStockLevel!: number; // Threshold for low stock alerts
 }
 
 export const InventoryItemSchema = SchemaFactory.createForClass(InventoryItem);

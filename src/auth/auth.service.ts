@@ -14,37 +14,38 @@ export class AuthService {
     private jwtService: JwtService,
   ) {}
 
-  // SIGN UP LOGIC
   async signUp(signUpDto: SignUpDto): Promise<{ message: string }> {
-    const { fullName, username, password, role } = signUpDto;
+    const { fullName, username, email, password, role } = signUpDto;
 
-    // Check if user already exists
-    const userExists = await this.userModel.findOne({ username });
+    const userExists = await this.userModel.findOne({ 
+      $or: [{ username }, { email }] 
+    });
+    
     if (userExists) {
-      throw new ConflictException('Username already taken');
+      throw new ConflictException('Username or Email already taken');
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create user
     await this.userModel.create({
       fullName,
       username,
+      email, 
       password: hashedPassword,
       role,
+      status: 'active', // Default status for new users
     });
 
     return { message: 'User registered successfully' };
   }
 
-  // LOGIN LOGIC
   async login(loginDto: LoginDto): Promise<{ accessToken: string; role: string }> {
     const { username, password } = loginDto;
 
-    const user = await this.userModel.findOne({ username });
-    if (!user) {
-      throw new UnauthorizedException('Invalid username');
+    const user = await this.userModel.findOne({ username }).select('+password');
+    
+    if (!user || user.status === 'inactive') {
+      throw new UnauthorizedException('Invalid credentials or account disabled');
     }
 
     const isPasswordMatched = await bcrypt.compare(password, user.password);
@@ -52,7 +53,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid password');
     }
 
-    // Generate JWT Token
+    
+    user.lastLogin = new Date();
+    await user.save();
+
     const token = this.jwtService.sign({ id: user._id, role: user.role });
 
     return { accessToken: token, role: user.role };

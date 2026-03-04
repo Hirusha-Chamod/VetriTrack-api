@@ -10,11 +10,13 @@ import { JwtStrategy } from './jwt.strategy';
 
 @Module({
   imports: [
-    // Registers the Passport module with a default strategy
+    
     PassportModule.register({ defaultStrategy: 'jwt' }), 
     
+    // Connects the User Schema for the AuthService to use
     MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]),
     
+    // Configuration for generating tokens (1-day expiration)
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
