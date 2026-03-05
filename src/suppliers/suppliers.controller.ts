@@ -1,8 +1,10 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, BadRequestException, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { SuppliersService } from './suppliers.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { AuthGuard } from '@nestjs/passport';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { Roles } from 'src/auth/decorators/roles.decorator';
 
 @Controller('suppliers')
 @UseGuards(AuthGuard('jwt'))
@@ -45,5 +47,27 @@ export class SuppliersController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.suppliersService.remove(id);
+  }
+
+  @Post('upload')
+  @Roles('owner','staff') 
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadSuppliers(@UploadedFile() file: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('Please upload a file');
+    }
+
+    // Validate that the file is either Excel or CSV
+    const allowedMimeTypes = [
+      'text/csv',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+      'application/vnd.ms-excel', // .xls
+    ];
+
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      throw new BadRequestException('Invalid file type. Please upload a .csv or .xlsx file.');
+    }
+
+    return await this.suppliersService.importFromBuffer(file.buffer);
   }
 }
