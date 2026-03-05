@@ -4,6 +4,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { InventoryModule } from './inventory/inventory.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
+import { ApprovalsModule } from './approvals/approvals.module';
+import { SuppliersModule } from './suppliers/suppliers.module';
 
 @Module({
   imports: [
@@ -25,6 +27,10 @@ import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
     TransactionsModule,
     
     PurchaseOrdersModule,
+    
+    ApprovalsModule,
+    
+    SuppliersModule,
   ],
 })
 export class AppModule {}

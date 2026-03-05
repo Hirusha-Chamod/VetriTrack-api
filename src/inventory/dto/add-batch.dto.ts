@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsNumber, IsDateString, Min } from 'class-validator';
+import { IsNotEmpty, IsString, IsNumber, IsDateString, Min, IsMongoId } from 'class-validator';
 
 export class AddBatchDto {
   @IsNotEmpty()
@@ -18,6 +18,6 @@ export class AddBatchDto {
   quantityOnHand!: number; // Starting stock amount
 
   @IsNotEmpty()
-  @IsString()
-  supplier!: string; // Source of the stock (e.g., 'VetMed Inc')
+  @IsMongoId()
+  supplier!: string;
 }

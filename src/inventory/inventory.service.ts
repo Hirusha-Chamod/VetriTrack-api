@@ -23,22 +23,27 @@ export class InventoryService {
     return await this.batchModel.create(dto);
   }
 
-  // Retrieves all items with their calculated total stock across all batches
+  // Retrieves all items
   async findAllItems() {
     return await this.itemModel.find().exec();
   }
 
   // Gets all individual stock batches for a specific product
-  async findBatchesByItem(itemId: string) {
-    return await this.batchModel.find({ itemId }).sort({ expiryDate: 1 }).exec();
+    async findBatchesByItem(itemId: string) {
+    return await this.batchModel
+      .find({ itemId })
+      .populate('supplier', 'supplierName') 
+      .sort({ expiryDate: 1 })
+      .exec();
   }
+
 
   // Identifies the earliest expiring batch for FEFO issuance
   async suggestFefoBatch(itemId: string) {
     const batch = await this.batchModel.findOne({
       itemId,
       quantityOnHand: { $gt: 0 },
-      expiryDate: { $gt: new Date() }, // Ensure not already expired
+      expiryDate: { $gt: new Date() },
     })
     .sort({ expiryDate: 1 })
     .exec();
@@ -81,5 +86,50 @@ export class InventoryService {
       },
       { $match: { isLow: true } }
     ]);
+  }
+
+
+  //  Generates report with populated item and supplier data
+  async getExpiryReport() {
+    const today = new Date();
+    const thirtyDaysFromNow = new Date();
+    thirtyDaysFromNow.setDate(today.getDate() + 30);
+
+    const batches = await this.batchModel
+      .find({ quantityOnHand: { $gt: 0 } })
+      .populate('itemId')
+      .populate('supplier') 
+      .exec();
+
+    const expiringSoon: any[] = [];
+    const expired: any[] = [];
+
+    for (const batch of batches) {
+      const item = batch.itemId as any;
+      const supplierDoc = batch.supplier as any; 
+      
+      if (!item) continue;
+
+      const expiry = new Date(batch.expiryDate);
+      const daysDiff = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 3600 * 24));
+      const value = batch.quantityOnHand * (item.unitPrice || 0);
+
+      const mappedData = {
+        product: item.itemName,
+        batchId: batch.batchCode,
+        expiryDate: batch.expiryDate,
+        quantity: batch.quantityOnHand,
+        supplier: supplierDoc ? supplierDoc.supplierName : 'Unknown Supplier',
+        value: value,
+      };
+
+      if (daysDiff <= 0) {
+        expired.push({ ...mappedData, daysExpired: Math.abs(daysDiff) });
+      } else if (daysDiff <= 30) {
+        expiringSoon.push({ ...mappedData, daysUntilExpiry: daysDiff });
+      }
+    }
+
+    return { expiringSoon, expired };
   }
 }

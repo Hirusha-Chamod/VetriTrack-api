@@ -15,8 +15,8 @@ export class StockBatch extends Document {
   @Prop({ required: true, default: 0 })
   quantityOnHand!: number;
 
-  @Prop({ required: true })
-  supplier!: string; 
+  @Prop({ type: Types.ObjectId, ref: 'Supplier', required: true })
+  supplier!: Types.ObjectId;
 }
 
 export const StockBatchSchema = SchemaFactory.createForClass(StockBatch);
