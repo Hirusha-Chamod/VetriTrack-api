@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ApprovalsService } from './approvals.service';
 import { ApprovalsController } from './approvals.controller';
 import { ApprovalRequest, ApprovalRequestSchema } from './schemas/request.schema';
+import { AuthModule } from 'src/auth/auth.module';
 
 @Module({
   imports: [
@@ -10,6 +11,7 @@ import { ApprovalRequest, ApprovalRequestSchema } from './schemas/request.schema
     MongooseModule.forFeature([
       { name: ApprovalRequest.name, schema: ApprovalRequestSchema }
     ]),
+    AuthModule, 
   ],
   controllers: [ApprovalsController],
   providers: [ApprovalsService],
