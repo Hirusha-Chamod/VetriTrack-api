@@ -1,13 +1,13 @@
-import { IsNotEmpty, IsString, IsNumber, IsEnum, Min } from 'class-validator';
+import { IsNotEmpty, IsString, IsNumber, IsEnum, Min, IsMongoId } from 'class-validator';
 
 export class CreateRequestDto {
   @IsNotEmpty()
-  @IsString()
-  itemId!: string; // Reference to the Item in the inventory
+  @IsMongoId()
+  itemId!: string;
 
   @IsNotEmpty()
   @IsString()
-  product!: string; // String name for easy display in the table
+  product!: string;
 
   @IsNotEmpty()
   @IsNumber()
@@ -15,8 +15,8 @@ export class CreateRequestDto {
   quantity!: number;
 
   @IsNotEmpty()
-  @IsString()
-  supplier!: string;
+  @IsMongoId()
+  supplierId!: string;
 
   @IsNotEmpty()
   @IsNumber()

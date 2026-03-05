@@ -1,12 +1,12 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 
-@Schema({ timestamps: true }) // Automatically adds createdAt and updatedAt
+@Schema({ timestamps: true })
 export class ApprovalRequest extends Document {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   requestedBy!: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Item', required: true })
+  @Prop({ type: Types.ObjectId, ref: 'InventoryItem', required: true })
   itemId!: Types.ObjectId;
 
   @Prop({ required: true })
@@ -15,8 +15,9 @@ export class ApprovalRequest extends Document {
   @Prop({ required: true })
   quantity!: number;
 
-  @Prop({ required: true })
-  supplier!: string;
+ 
+  @Prop({ type: Types.ObjectId, ref: 'Supplier', required: true })
+  supplierId!: Types.ObjectId;
 
   @Prop({ required: true })
   unitPrice!: number;
