@@ -39,7 +39,7 @@ export class AuthService {
     return { message: 'User registered successfully' };
   }
 
-  async login(loginDto: LoginDto): Promise<{ accessToken: string; role: string }> {
+  async login(loginDto: LoginDto): Promise<{ accessToken: string; user: { username: string; role: string } }> {
     const { username, password } = loginDto;
 
     const user = await this.userModel.findOne({ username }).select('+password');
@@ -59,6 +59,11 @@ export class AuthService {
 
     const token = this.jwtService.sign({ id: user._id, role: user.role });
 
-    return { accessToken: token, role: user.role };
+    return { 
+    accessToken: token, 
+    user: {
+      username: user.username,
+      role: user.role 
+    } }
   }
 }
