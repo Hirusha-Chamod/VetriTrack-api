@@ -96,3 +96,261 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+# VetriTrack API - Setup & Installation Guide
+
+## Overview
+VetriTrack is a NestJS-based REST API for managing veterinary inventory, suppliers, purchase orders, stock transactions, and approval workflows.
+
+## Prerequisites
+- **Node.js**: v18.0.0 or higher
+- **npm**: v9.0.0 or higher
+- **MongoDB**: Cloud (MongoDB Atlas) or local instance
+- **Git**: For version control
+
+## Installation Steps
+
+### 1. Clone the Repository
+```bash
+git clone <repository-url>
+cd VetriTrack-api
+```
+
+### 2. Install Dependencies
+```bash
+npm install
+```
+
+### 3. Environment Configuration
+Create a `.env` file in the root directory with the following variables:
+
+```env
+# Database
+MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/?appName=YourApp
+
+# JWT Authentication
+JWT_SECRET=your_secure_jwt_secret_key_here
+
+# Server
+PORT=3000
+```
+
+**Environment Variables Explanation:**
+- `MONGO_URI`: MongoDB connection string (Atlas or local)
+- `JWT_SECRET`: Secret key for JWT token generation (use a strong, random string)
+- `PORT`: Server port (default: 3000)
+
+### 4. Verify Installation
+```bash
+npm run build
+```
+
+## Running the Application
+
+### Development Mode (with auto-reload)
+```bash
+npm run start:dev
+```
+Server runs on `http://localhost:3000`
+
+### Production Mode
+```bash
+npm run build
+npm run start:prod
+```
+
+### Debug Mode
+```bash
+npm run start:debug
+```
+Runs with Node debugger attached on port 9229
+
+## Testing
+
+### Unit Tests
+```bash
+npm run test
+```
+
+### Watch Mode (re-run on changes)
+```bash
+npm run test:watch
+```
+
+### E2E Tests
+```bash
+npm run test:e2e
+```
+
+### Test Coverage Report
+```bash
+npm run test:cov
+```
+
+## Code Quality
+
+### Linting & Formatting
+```bash
+# Check for linting errors
+npm run lint
+
+# Auto-format code
+npm run format
+```
+
+## Database Setup
+
+### MongoDB Atlas (Cloud)
+1. Create account at [mongodb.com](https://www.mongodb.com)
+2. Create a cluster
+3. Add database user credentials
+4. Get connection string
+5. Add string to `.env` as `MONGO_URI`
+
+### Local MongoDB
+```bash
+# Install MongoDB Community Edition
+# macOS:
+brew tap mongodb/brew
+brew install mongodb-community
+
+# Start MongoDB:
+brew services start mongodb-community
+
+# Connection string:
+MONGO_URI=mongodb://localhost:27017/vetritrack
+```
+
+## Project Structure
+```
+src/
+├── app.module.ts          # Root module
+├── app.controller.ts      # Root controller
+├── app.service.ts         # Root service
+├── main.ts                # Application entry point
+│
+├── auth/                  # Authentication module
+│   ├── auth.service.ts
+│   ├── auth.controller.ts
+│   ├── jwt.strategy.ts
+│   ├── schemas/
+│   ├── dto/
+│   ├── decorators/
+│   └── guards/
+│
+├── inventory/             # Inventory management
+│   ├── inventory.service.ts
+│   ├── inventory.controller.ts
+│   ├── schemas/
+│   └── dto/
+│
+├── suppliers/             # Supplier management
+│   ├── suppliers.service.ts
+│   ├── suppliers.controller.ts
+│   ├── schemas/
+│   └── dto/
+│
+├── purchase-orders/       # Purchase order management
+│   ├── purchase-orders.service.ts
+│   ├── purchase-orders.controller.ts
+│   ├── schemas/
+│   └── dto/
+│
+├── transactions/          # Stock transactions (FEFO)
+│   ├── transactions.service.ts
+│   ├── transactions.controller.ts
+│   ├── schemas/
+│   └── dto/
+│
+├── approvals/             # Purchase approval workflow
+│   ├── approvals.service.ts
+│   ├── approvals.controller.ts
+│   ├── schemas/
+│   └── dto/
+│
+└── filters/               # Global exception filter
+    └── exception-filter.ts
+```
+
+## Troubleshooting
+
+### Port Already in Use
+```bash
+# Change port in .env
+PORT=3001
+
+# Or kill process using port 3000 (macOS/Linux):
+lsof -ti:3000 | xargs kill -9
+```
+
+### MongoDB Connection Error
+- Verify `MONGO_URI` is correct
+- Check MongoDB is running
+- Ensure IP whitelist includes your machine (Atlas)
+- Test connection with MongoDB Compass
+
+### JWT Token Issues
+- Ensure `JWT_SECRET` is set in `.env`
+- Token expires in 1 day (see `auth.module.ts`)
+- Include Bearer token in Authorization header
+
+### Build Errors
+```bash
+npm run build
+# Check tsconfig.json settings if TypeScript errors occur
+```
+
+## NPM Scripts Reference
+| Command | Purpose |
+|---------|---------|
+| `npm run start` | Start production server |
+| `npm run start:dev` | Start with file watcher |
+| `npm run start:debug` | Start with debugger |
+| `npm run build` | Compile TypeScript |
+| `npm run test` | Run unit tests |
+| `npm run test:watch` | Run tests in watch mode |
+| `npm run test:e2e` | Run E2E tests |
+| `npm run test:cov` | Generate coverage report |
+| `npm run lint` | Check code style |
+| `npm run format` | Auto-format code |
+
+## Required Dependencies
+
+### Core NestJS
+- `@nestjs/common` - Core framework
+- `@nestjs/core` - Core framework
+- `@nestjs/platform-express` - Express integration
+
+### Database & ORM
+- `@nestjs/mongoose` - MongoDB integration
+- `mongoose` - MongoDB ODM
+
+### Authentication
+- `@nestjs/jwt` - JWT tokens
+- `@nestjs/passport` - Passport integration
+- `passport-jwt` - JWT strategy
+- `bcryptjs` - Password hashing
+
+### Configuration
+- `@nestjs/config` - Environment variables
+
+### Validation
+- `class-validator` - DTO validation
+- `class-transformer` - DTO transformation
+
+### File Upload
+- `@nestjs/platform-express` - File upload handling
+
+### Excel/CSV Import
+- `xlsx` - Excel file parsing
+
+See [package.json](package.json) for complete dependencies.
+
+## Next Steps
+1. Review [API Endpoints Documentation](./API_ENDPOINTS.md)
+2. Check [Middleware & Guards Documentation](./MIDDLEWARE.md)
+3. Review authentication flow in [src/auth](src/auth)
+4. Test endpoints with Postman/Insomnia
+
+## Support
+For issues, check the error logs in console output or MongoDB Atlas logs.
