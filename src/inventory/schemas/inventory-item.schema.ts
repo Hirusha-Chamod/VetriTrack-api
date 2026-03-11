@@ -3,6 +3,9 @@ import { Document } from 'mongoose';
 
 @Schema({ timestamps: true })
 export class InventoryItem extends Document {
+  @Prop({ required: true, unique: true })
+  itemCode!: string;
+
   @Prop({ required: true })
   itemName!: string;
 
@@ -13,7 +16,13 @@ export class InventoryItem extends Document {
   unitOfMeasure!: string;
 
   @Prop({ required: true, default: 0 })
-  minStockLevel!: number; // Threshold for low stock alerts
+  minStockLevel!: number;
+
+  @Prop({ required: true, default: 0 })
+  unitPrice!: number;
+
+  @Prop({ required: false })
+  notes?: string;
 }
 
 export const InventoryItemSchema = SchemaFactory.createForClass(InventoryItem);

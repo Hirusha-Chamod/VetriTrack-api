@@ -1,4 +1,4 @@
-import { Injectable, ConflictException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, ConflictException, UnauthorizedException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
@@ -6,6 +6,7 @@ import { JwtService } from '@nestjs/jwt';
 import { User } from './schemas/user.schema';
 import { SignUpDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
 export class AuthService {
@@ -39,7 +40,7 @@ export class AuthService {
     return { message: 'User registered successfully' };
   }
 
-  async login(loginDto: LoginDto): Promise<{ accessToken: string; user: { username: string; role: string } }> {
+  async login(loginDto: LoginDto): Promise<{ accessToken: string; user: { id: string; username: string; role: string } }> {
     const { username, password } = loginDto;
 
     const user = await this.userModel.findOne({ username }).select('+password');
@@ -62,8 +63,72 @@ export class AuthService {
     return { 
     accessToken: token, 
     user: {
+      id: user._id.toString(),
       username: user.username,
       role: user.role 
     } }
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    const users = await this.userModel.find().select('-password');
+    return users;
+  }
+
+  async getUserById(id: string): Promise<User> {
+    const user = await this.userModel.findById(id).select('-password');
+    
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return user;
+  }
+
+  async updateUser(id: string, updateUserDto: UpdateUserDto): Promise<User> {
+    const { fullName, email, role, password } = updateUserDto;
+
+    const user = await this.userModel.findById(id);
+    
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Check if email is already taken by another user
+    if (email) {
+      const existingUser = await this.userModel.findOne({ email, _id: { $ne: id } });
+      if (existingUser) {
+        throw new ConflictException('Email already in use');
+      }
+      user.email = email;
+    }
+
+    if (fullName) {
+      user.fullName = fullName;
+    }
+
+    if (role) {
+      user.role = role;
+    }
+
+    if (password) {
+      user.password = await bcrypt.hash(password, 10);
+    }
+
+    await user.save();
+    const updatedUser = await this.userModel.findById(id).select('-password').exec();
+    return updatedUser!;
+  }
+
+  async deactivateUser(id: string): Promise<{ message: string }> {
+    const user = await this.userModel.findById(id);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    user.status = 'inactive';
+    await user.save();
+
+    return { message: 'User deactivated successfully' };
   }
 }

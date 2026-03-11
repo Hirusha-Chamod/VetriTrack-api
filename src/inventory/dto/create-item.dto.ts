@@ -1,6 +1,10 @@
-import { IsNotEmpty, IsString, IsNumber, Min } from 'class-validator';
+import { IsNotEmpty, IsString, IsNumber, Min, IsOptional } from 'class-validator';
 
 export class CreateItemDto {
+  @IsNotEmpty()
+  @IsString()
+  itemCode!: string;
+
   @IsNotEmpty()
   @IsString()
   itemName!: string;
@@ -15,5 +19,13 @@ export class CreateItemDto {
 
   @IsNumber()
   @Min(0)
-  minStockLevel!: number; // Threshold for low stock alerts
+  minStockLevel!: number;
+
+  @IsNumber()
+  @Min(0)
+  unitPrice!: number;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }

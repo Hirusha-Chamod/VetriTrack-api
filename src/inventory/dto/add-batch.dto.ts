@@ -2,20 +2,20 @@ import { IsNotEmpty, IsString, IsNumber, IsDateString, Min, IsMongoId } from 'cl
 
 export class AddBatchDto {
   @IsNotEmpty()
-  @IsString()
-  itemId!: string; // Reference to the parent InventoryItem
+  @IsMongoId()
+  itemId!: string;
 
   @IsNotEmpty()
   @IsString()
-  batchCode!: string; // Unique identifier for the batch
+  batchCode!: string;
 
   @IsNotEmpty()
   @IsDateString()
-  expiryDate!: string; // ISO format date for FEFO sorting
+  expiryDate!: string;
 
   @IsNumber()
   @Min(1)
-  quantityOnHand!: number; // Starting stock amount
+  quantityOnHand!: number;
 
   @IsNotEmpty()
   @IsMongoId()

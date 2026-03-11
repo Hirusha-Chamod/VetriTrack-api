@@ -13,23 +13,19 @@ export class InventoryService {
     @InjectModel(StockBatch.name) private batchModel: Model<StockBatch>,
   ) {}
 
-  // Creates a new master product
   async createItem(dto: CreateItemDto) {
     return await this.itemModel.create(dto);
   }
 
-  // Adds a specific stock delivery to an item
   async addBatch(dto: AddBatchDto) {
     return await this.batchModel.create(dto);
   }
 
-  // Retrieves all items
   async findAllItems() {
-    return await this.itemModel.find().exec();
+    return await this.itemModel.find().sort({ itemName: 1 }).exec();
   }
 
-  // Gets all individual stock batches for a specific product
-    async findBatchesByItem(itemId: string) {
+  async findBatchesByItem(itemId: string) {
     return await this.batchModel
       .find({ itemId })
       .populate('supplier', 'supplierName') 
@@ -37,8 +33,6 @@ export class InventoryService {
       .exec();
   }
 
-
-  // Identifies the earliest expiring batch for FEFO issuance
   async suggestFefoBatch(itemId: string) {
     const batch = await this.batchModel.findOne({
       itemId,
@@ -52,7 +46,6 @@ export class InventoryService {
     return batch;
   }
 
-  // Updates reorder threshold for the Owner's settings screen
   async updateReorderLevel(itemId: string, minLevel: number) {
     const item = await this.itemModel.findByIdAndUpdate(
       itemId,
@@ -63,33 +56,37 @@ export class InventoryService {
     return item;
   }
 
-  // Aggregates total stock and filters items below their minimum level
   async getLowStockAlerts() {
     return await this.batchModel.aggregate([
-      { $group: { _id: '$itemId', totalStock: { $sum: '$quantityOnHand' } } },
+      {
+        $group: {
+          _id: '$itemId',
+          totalStock: { $sum: '$quantityOnHand' },
+        },
+      },
       {
         $lookup: {
           from: 'inventoryitems',
           localField: '_id',
           foreignField: '_id',
-          as: 'itemDetails'
-        }
+          as: 'itemDetails',
+        },
       },
       { $unwind: '$itemDetails' },
       {
         $project: {
+          itemCode: '$itemDetails.itemCode',
           itemName: '$itemDetails.itemName',
           totalStock: 1,
           minLevel: '$itemDetails.minStockLevel',
-          isLow: { $lte: ['$totalStock', '$itemDetails.minStockLevel'] }
-        }
+          unitOfMeasure: '$itemDetails.unitOfMeasure',
+          isLow: { $lte: ['$totalStock', '$itemDetails.minStockLevel'] },
+        },
       },
-      { $match: { isLow: true } }
+      { $match: { isLow: true } },
     ]);
   }
 
-
-  //  Generates report with populated item and supplier data
   async getExpiryReport() {
     const today = new Date();
     const thirtyDaysFromNow = new Date();
@@ -115,10 +112,12 @@ export class InventoryService {
       const value = batch.quantityOnHand * (item.unitPrice || 0);
 
       const mappedData = {
+        itemCode: item.itemCode,
         product: item.itemName,
         batchId: batch.batchCode,
         expiryDate: batch.expiryDate,
         quantity: batch.quantityOnHand,
+        unit: item.unitOfMeasure,
         supplier: supplierDoc ? supplierDoc.supplierName : 'Unknown Supplier',
         value: value,
       };

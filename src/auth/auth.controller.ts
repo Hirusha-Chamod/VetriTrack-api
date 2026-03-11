@@ -1,7 +1,9 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Get, Post, Param, Put, Patch, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { SignUpDto } from './dto/signup.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
+import { AuthGuard } from '@nestjs/passport';
 
 @Controller('auth')
 export class AuthController {
@@ -15,7 +17,31 @@ export class AuthController {
 
   
   @Post('/login')
-  login(@Body() loginDto: LoginDto): Promise<{ accessToken: string; user: { username: string; role: string } }> {
+  login(@Body() loginDto: LoginDto): Promise<{ accessToken: string; user: { id: string; username: string; role: string } }> {
     return this.authService.login(loginDto);
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Get('/users')
+  getAllUsers() {
+    return this.authService.getAllUsers();
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Get('/users/:id')
+  getUserById(@Param('id') id: string) {
+    return this.authService.getUserById(id);
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Put('/users/:id')
+  updateUser(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
+    return this.authService.updateUser(id, updateUserDto);
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Patch('/users/:id/deactivate')
+  deactivateUser(@Param('id') id: string) {
+    return this.authService.deactivateUser(id);
   }
 }
