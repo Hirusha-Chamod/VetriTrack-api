@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { PurchaseOrder } from './schemas/purschase-order.schema';
 import { AddPoItemDto } from './dto/add-po-item.dto';
 import { CreatePoDto } from './dto/create-po.dto';
@@ -25,15 +25,13 @@ export class PurchaseOrdersService {
     });
   }
 
-  // Step 2 & 3: Add Items/Quantity to a specific Draft PO
   async addItemToDraft(poId: string, itemDto: AddPoItemDto) {
     const po = await this.poModel.findById(poId);
     if (!po) throw new NotFoundException('Purchase Order not found');
     if (po.status !== 'Draft') throw new BadRequestException('Cannot add items to a non-draft PO');
 
-    // Add item to array and update total value
     po.items.push({
-      itemId: new Object(itemDto.itemId) as any,
+      itemId: new Types.ObjectId(itemDto.itemId), 
       quantityRequested: itemDto.quantity,
       quantityReceived: 0,
       unitPrice: itemDto.unitPrice,
@@ -43,22 +41,21 @@ export class PurchaseOrdersService {
     return await po.save();
   }
 
-  // Retrieves Draft POs grouped by Supplier for the "Draft POs" screen
   async findDrafts() {
     return await this.poModel
       .find({ status: 'Draft' })
       .populate('supplierId', 'supplierName')
-      .populate('items.itemId', 'itemName')
+      .populate('items.itemId', 'itemName') 
       .sort({ updatedAt: -1 })
       .exec();
   }
 
-  // Retrieves all POs for the main "Purchase Orders" list with status filters
   async findAll(status?: string) {
     const filter = status ? { status } : {};
     return await this.poModel
       .find(filter)
       .populate('supplierId', 'supplierName')
+      .populate('items.itemId', 'itemName')
       .sort({ createdAt: -1 })
       .exec();
   }
