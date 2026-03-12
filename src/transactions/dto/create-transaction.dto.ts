@@ -3,21 +3,33 @@ import { IsNotEmpty, IsString, IsNumber, IsEnum, Min, IsOptional } from 'class-v
 export class CreateTransactionDto {
   @IsNotEmpty()
   @IsString()
-  itemId!: string; // The product being moved
+  itemId!: string;
 
   @IsOptional()
   @IsString()
-  batchId?: string; // Specific batch (Optional for FEFO which auto-selects)
+  batchId?: string; 
+
+  // NEW: Accept lot number and expiry date for RECEIVE transactions
+  @IsOptional()
+  @IsString()
+  batchLotNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  expiryDate?: string;
 
   @IsNotEmpty()
   @IsEnum(['ISSUE', 'RECEIVE', 'ADJUSTMENT'])
-  type!: string; // Matches your three UI cards
+  type!: string;
 
   @IsNumber()
-  @Min(1)
-  quantity!: number; // Amount being moved or adjusted
+  quantity!: number; 
 
   @IsOptional()
   @IsString()
-  reason?: string; // e.g., "Damaged goods" or "Monthly count"
+  supplierId?: string;
+
+  @IsOptional()
+  @IsString()
+  reason?: string; 
 }

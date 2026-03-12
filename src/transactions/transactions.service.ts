@@ -12,45 +12,68 @@ export class TransactionsService {
     @InjectModel(StockBatch.name) private batchModel: Model<StockBatch>,
   ) {}
 
-  async create(createDto: CreateTransactionDto, userId: string) {
-    const { itemId, batchId, quantity, type } = createDto;
+ async create(createDto: CreateTransactionDto, userId: string) {
+    try {
+      // 1. Add supplierId to the destructured list
+      const { itemId, batchId, quantity, type, batchLotNumber, expiryDate, supplierId } = createDto;
+      let batch;
 
-    // 1. Handle FEFO Logic for 'ISSUE' if no specific batch is provided
-    let targetBatchId = batchId;
-    if (type === 'ISSUE' && !targetBatchId) {
-      const bestBatch = await this.batchModel.findOne({ /* ... */ }).sort({ expiryDate: 1 });
+      if (type === 'RECEIVE') {
+        if (!batchLotNumber || !expiryDate) {
+          throw new BadRequestException('Batch number and expiry date are required to receive stock');
+        }
 
-      if (!bestBatch) throw new BadRequestException('No suitable batch found');
-      
-      targetBatchId = bestBatch._id.toString(); 
+        batch = await this.batchModel.findOne({ itemId, batchCode: batchLotNumber });
+        
+        if (!batch) {
+          // 2. Ensure we have it
+          if (!supplierId) throw new BadRequestException('Supplier is required to create a new batch');
+
+          batch = await this.batchModel.create({
+            itemId,
+            batchCode: batchLotNumber,
+            expiryDate: new Date(expiryDate),
+            quantityOnHand: 0,
+            supplier: supplierId, // 3. ADD THIS LINE TO SATISFY MONGOOSE!
+          });
+        }
+      } 
+      else if (!batchId) {
+        batch = await this.batchModel.findOne({ itemId, quantityOnHand: { $gt: 0 } }).sort({ expiryDate: 1 });
+        if (!batch) throw new BadRequestException('No suitable batch found with available stock');
+      } 
+      else {
+        batch = await this.batchModel.findById(batchId);
+        if (!batch) throw new BadRequestException('Target batch not found');
+      }
+
+      // --- 2. APPLY THE QUANTITY CHANGES ---
+      if (type === 'ISSUE') {
+        if (batch.quantityOnHand < quantity) throw new BadRequestException('Insufficient stock in batch');
+        batch.quantityOnHand -= quantity;
+      } 
+      else if (type === 'RECEIVE') {
+        batch.quantityOnHand += quantity;
+      } 
+      else if (type === 'ADJUSTMENT') {
+        if (!createDto.reason) throw new BadRequestException('Reason required for adjustments');
+        batch.quantityOnHand += quantity; 
+      }
+
+      await batch.save();
+
+      // --- 3. LOG THE TRANSACTION ---
+      return await this.transactionModel.create({
+        ...createDto,
+        batchId: batch._id,
+        performedBy: userId,
+      });
+
+    } catch (error: any) {
+      // 👇 THIS WILL PRINT THE EXACT ERROR IN YOUR TERMINAL 👇
+      console.error("🔥 TRANSACTION FAILED 🔥:", error.message || error);
+      throw error; 
     }
-
-    // 2. Load the batch and update stock levels
-    const batch = await this.batchModel.findById(targetBatchId);
-    if (!batch) throw new BadRequestException('Target batch not found');
-
-    if (type === 'ISSUE') {
-      if (batch.quantityOnHand < quantity) throw new BadRequestException('Insufficient stock');
-      batch.quantityOnHand -= quantity;
-    } 
-    else if (type === 'RECEIVE') {
-      batch.quantityOnHand += quantity;
-    } 
-    else if (type === 'ADJUSTMENT') {
-      // Reason is required for adjustments in your UI
-      if (!createDto.reason) throw new BadRequestException('Reason required for adjustments');
-      // For adjustments, quantity can be positive or negative from the FE
-      batch.quantityOnHand += quantity; 
-    }
-
-    await batch.save();
-
-    // 3. Log the audit record
-    return await this.transactionModel.create({
-      ...createDto,
-      batchId: targetBatchId,
-      performedBy: userId,
-    });
   }
 
   async findAll() {

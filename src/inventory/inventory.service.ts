@@ -21,8 +21,32 @@ export class InventoryService {
     return await this.batchModel.create(dto);
   }
 
-  async findAllItems() {
-    return await this.itemModel.find().sort({ itemName: 1 }).exec();
+async findAllItems() {
+    // 1. Fetch all items as plain JavaScript objects
+    const items = await this.itemModel.find().sort({ itemName: 1 }).lean().exec();
+
+    // 2. Loop through each item and calculate its total stock
+    const itemsWithStock = await Promise.all(
+      items.map(async (item) => {
+        // 🔥 FIXED: Search for BOTH the ObjectId and the plain string!
+        const batches = await this.batchModel.find({ 
+          $or: [
+            { itemId: item._id },
+            { itemId: item._id.toString() } 
+          ]
+        });
+        
+        // Add up the quantityOnHand from all active batches
+        const currentStock = batches.reduce((sum, batch) => sum + batch.quantityOnHand, 0);
+        
+        return {
+          ...item,
+          currentStock,
+        };
+      })
+    );
+
+    return itemsWithStock;
   }
 
   async findBatchesByItem(itemId: string) {
