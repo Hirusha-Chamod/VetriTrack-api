@@ -12,48 +12,51 @@ import { AuthGuard } from '@nestjs/passport';
 import { TasksService } from './tasks.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
+import { RolesGuard } from 'src/auth/guards/roles.guard';
+import { Roles } from 'src/auth/decorators/roles.decorator';
 
 @Controller('tasks')
-@UseGuards(AuthGuard('jwt')) // Protects all routes in this controller
+@UseGuards(AuthGuard('jwt'), RolesGuard)
 export class TasksController {
   constructor(private readonly tasksService: TasksService) {}
 
-  // 1. Create a new task
   // POST /tasks
   @Post()
+  @Roles('owner', 'staff')
   create(@Body() createTaskDto: CreateTaskDto, @Req() req: any) {
-    // Extracts the user ID from the JWT token (added by your AuthGuard)
     const userId = req.user.id; 
     return this.tasksService.create(createTaskDto, userId);
   }
 
-  // 2. Get tasks assigned to the currently logged-in user
+ 
   // GET /tasks/my-tasks
-  // Note: This must be defined BEFORE /:id so NestJS doesn't think "my-tasks" is an ID!
   @Get('my-tasks')
+  @Roles('owner', 'staff')
   getMyTasks(@Req() req: any) {
     const userId = req.user.id;
     console.log(`Fetching tasks for user ID: ${userId}`);
     return this.tasksService.findByAssignedUser(userId);
   }
 
-  // 3. Get all tasks (Usually for the Owner/Manager)
+
   // GET /tasks
   @Get()
+  @Roles('owner', 'staff')
   findAll() {
     return this.tasksService.findAll();
   }
 
-  // 4. Get a specific task by ID
+ 
   // GET /tasks/:id
   @Get(':id')
+  @Roles('owner', 'staff')
   findOne(@Param('id') id: string) {
     return this.tasksService.findOne(id);
   }
 
-  // 5. Update a task's status (Complete, Cancel, etc.)
   // PATCH /tasks/:id/status
   @Patch(':id/status')
+  @Roles('owner', 'staff')
   updateStatus(
     @Param('id') id: string, 
     @Body() updateTaskDto: UpdateTaskDto

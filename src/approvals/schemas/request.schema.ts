@@ -15,7 +15,6 @@ export class ApprovalRequest extends Document {
   @Prop({ required: true })
   quantity!: number;
 
- 
   @Prop({ type: Types.ObjectId, ref: 'Supplier', required: true })
   supplierId!: Types.ObjectId;
 
@@ -31,15 +30,19 @@ export class ApprovalRequest extends Document {
   @Prop({ required: true })
   reason!: string;
 
+  // 👇 UPDATED: Expanded the enum to match Figma
   @Prop({ 
     required: true, 
-    enum: ['pending', 'approved', 'rejected'], 
+    enum: ['pending', 'approved', 'addedToDraftPO', 'convertedToPO', 'rejected'], 
     default: 'pending' 
   })
   status!: string;
 
   @Prop({ type: Types.ObjectId, ref: 'User' })
   reviewedBy?: Types.ObjectId;
+  
+  @Prop({ type: Types.ObjectId, ref: 'PurchaseOrder' })
+  linkedPOId?: Types.ObjectId; 
 }
 
 export const ApprovalRequestSchema = SchemaFactory.createForClass(ApprovalRequest);

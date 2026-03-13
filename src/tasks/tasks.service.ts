@@ -11,7 +11,7 @@ export class TasksService {
     @InjectModel(Task.name) private taskModel: Model<Task>,
   ) {}
 
-  // Helper method to format the Mongoose document to match your Frontend UI interface
+  
   private formatTask(taskDoc: any) {
     return {
       id: taskDoc._id.toString(),
@@ -35,7 +35,7 @@ export class TasksService {
     };
   }
 
-  // 1. Create a new task
+  //  Create a new task
   async create(createTaskDto: CreateTaskDto, userId: string) {
     const newTask = await this.taskModel.create({
       ...createTaskDto,
@@ -51,7 +51,7 @@ export class TasksService {
     return this.formatTask(populatedTask);
   }
 
-  // 2. Get ALL tasks (For the Owner/Manager)
+  // Get ALL tasks (For the Owner/Manager)
   async findAll() {
     const tasks = await this.taskModel
       .find()
@@ -63,7 +63,7 @@ export class TasksService {
     return tasks.map(task => this.formatTask(task));
   }
 
-  // 3. Get tasks assigned to a specific user (For Staff Dashboard)
+  // Get tasks assigned to a specific user (For Staff Dashboard)
   async findByAssignedUser(userId: string) {
     const tasks = await this.taskModel
       .find({ assignedTo: userId }) 
@@ -76,7 +76,7 @@ export class TasksService {
     return tasks.map(task => this.formatTask(task));
   }
 
-  // 4. Get a single task by ID
+  // Get a single task by ID
   async findOne(id: string) {
     const task = await this.taskModel
       .findById(id)

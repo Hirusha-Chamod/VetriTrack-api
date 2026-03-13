@@ -16,6 +16,13 @@ export class ApprovalsController {
   create(@Body() createDto: CreateRequestDto, @Req() req: any) {
     return this.approvalsService.create(createDto, req.user.id);
   }
+  
+  // Gets approval requests created by the logged-in user - Owner and Staff
+  @Get('my-requests')
+  @Roles('owner', 'staff')
+  findMyRequests(@Req() req: any) {
+    return this.approvalsService.findMyRequests(req.user.id);
+  }
 
   // Gets all pending approval requests - Owner only
   @Get('pending')
