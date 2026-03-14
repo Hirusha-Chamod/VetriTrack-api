@@ -42,7 +42,14 @@ async findMyRequests(userId: string) {
       .sort({ createdAt: -1 });
   }
 
- async updateStatus(id: string, status: string, adminId: string) {
+ async updateStatus(
+    id: string, 
+    status: string, 
+    adminId: string, 
+    // 👇 NEW: Allow overriding quantity and supplier during approval
+    finalQuantity?: number,
+    finalSupplierId?: string
+  ) {
     const request = await this.approvalModel.findById(id);
     if (!request) throw new NotFoundException('Request not found');
     if (request.status !== 'pending') throw new BadRequestException('Request already processed');
@@ -50,8 +57,11 @@ async findMyRequests(userId: string) {
     request.status = status;
     request.reviewedBy = adminId as any;
 
+    // Apply the owner's edits if provided
+    if (finalQuantity) request.quantity = finalQuantity;
+    if (finalSupplierId) request.supplierId = new Types.ObjectId(finalSupplierId);
+
     if (status === 'approved') {
-      // Create the PO
       const draftPO = await this.poService.createDraft({
         supplierId: request.supplierId.toString(),
         notes: `Automatically generated from approved request: ${request.reason}`,
@@ -59,7 +69,7 @@ async findMyRequests(userId: string) {
 
       await this.poService.addItemToDraft(draftPO._id.toString(), {
         itemId: request.itemId.toString(),
-        quantity: request.quantity,
+        quantity: request.quantity, // Uses the newly updated quantity!
         unitPrice: request.unitPrice,
       });
 

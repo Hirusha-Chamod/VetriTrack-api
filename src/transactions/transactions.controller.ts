@@ -19,7 +19,7 @@ export class TransactionsController {
 
   // Provides data for the Transaction History list - Owner only
   @Get()
-  @Roles('owner')
+   @Roles('owner', 'staff')
   findAll() {
     return this.transactionsService.findAll();
   }

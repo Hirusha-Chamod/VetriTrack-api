@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsNumber, IsEnum, Min, IsMongoId } from 'class-validator';
+import { IsNotEmpty, IsString, IsNumber, IsEnum, Min, IsMongoId, IsOptional } from 'class-validator';
 
 export class CreateRequestDto {
   @IsNotEmpty()
@@ -30,4 +30,8 @@ export class CreateRequestDto {
   @IsNotEmpty()
   @IsString()
   reason!: string;
+
+  @IsOptional()
+  @IsEnum(['manual', 'low-stock', 'recommendation'])
+  source?: string;
 }

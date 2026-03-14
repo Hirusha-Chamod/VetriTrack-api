@@ -32,13 +32,15 @@ export class ApprovalsController {
   }
 
   // Updates approval request status (approve/reject) - Owner only
-  @Patch(':id/status')
+@Patch(':id/status')
   @Roles('owner')
   updateStatus(
     @Param('id') id: string, 
-    @Body('status') status: 'approved' | 'rejected',
+    @Body('status') status: string,
+    @Body('finalQuantity') finalQuantity: number,
+    @Body('finalSupplierId') finalSupplierId: string,
     @Req() req: any
   ) {
-    return this.approvalsService.updateStatus(id, status, req.user.id);
+    return this.approvalsService.updateStatus(id, status, req.user.id, finalQuantity, finalSupplierId);
   }
 }

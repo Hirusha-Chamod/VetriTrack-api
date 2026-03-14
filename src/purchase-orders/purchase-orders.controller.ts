@@ -13,35 +13,35 @@ export class PurchaseOrdersController {
 
   // Step 1: Initialize a new Draft PO - Owner only
   @Post('draft')
-  @Roles('owner')
+   @Roles('owner', 'staff')
   createDraft(@Body() createPoDto: CreatePoDto) {
     return this.poService.createDraft(createPoDto);
   }
 
   // Step 2 & 3: Add items to the draft - Owner only
   @Patch('draft/:id/add-item')
-  @Roles('owner')
+   @Roles('owner', 'staff')
   addItem(@Param('id') id: string, @Body() addItemDto: AddPoItemDto) {
     return this.poService.addItemToDraft(id, addItemDto);
   }
 
   // Gets all drafts (grouped for the "Draft POs" screen) - Owner only
   @Get('drafts')
-  @Roles('owner')
+   @Roles('owner', 'staff')
   getDrafts() {
     return this.poService.findDrafts();
   }
 
   // Main list for the "Purchase Orders" screen (supports ?status=Sent) - Owner only
   @Get()
-  @Roles('owner')
+   @Roles('owner', 'staff')
   findAll(@Query('status') status?: string) {
     return this.poService.findAll(status);
   }
 
   // Updates status (e.g., clicking "Send" in the UI) - Owner only
   @Patch(':id/status')
-  @Roles('owner')
+   @Roles('owner', 'staff')
   updateStatus(@Param('id') id: string, @Body('status') status: string) {
     return this.poService.updateStatus(id, status);
   }

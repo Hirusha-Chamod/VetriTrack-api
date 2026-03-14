@@ -30,7 +30,14 @@ export class ApprovalRequest extends Document {
   @Prop({ required: true })
   reason!: string;
 
-  // 👇 UPDATED: Expanded the enum to match Figma
+  @Prop({ 
+    required: true, 
+    enum: ['manual', 'low-stock', 'recommendation'], 
+    default: 'manual' 
+  })
+  source!: string;
+
+
   @Prop({ 
     required: true, 
     enum: ['pending', 'approved', 'addedToDraftPO', 'convertedToPO', 'rejected'], 
@@ -40,7 +47,7 @@ export class ApprovalRequest extends Document {
 
   @Prop({ type: Types.ObjectId, ref: 'User' })
   reviewedBy?: Types.ObjectId;
-  
+
   @Prop({ type: Types.ObjectId, ref: 'PurchaseOrder' })
   linkedPOId?: Types.ObjectId; 
 }
