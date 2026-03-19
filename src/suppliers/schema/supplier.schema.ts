@@ -12,7 +12,7 @@ export class Supplier extends Document {
   @Prop({ required: true })
   contactName!: string;
 
-  @Prop({ required: true })
+ @Prop({ required: true, unique: true })
   email!: string;
 
   @Prop({ required: true })
@@ -25,7 +25,13 @@ export class Supplier extends Document {
   notes?: string;
 
   @Prop()
-  leadTimeNotes?: string; 
+  leadTimeNotes?: string;
+
+  @Prop({ default: 0 })
+  averageLeadTimeDays!: number;
+
+  @Prop({ default: 0 })
+  totalOrdersReceived!: number;
 }
 
 export const SupplierSchema = SchemaFactory.createForClass(Supplier);

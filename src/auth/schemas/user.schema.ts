@@ -22,7 +22,13 @@ export class User extends Document {
   status!: string;
 
   @Prop()
-  lastLogin?: Date; 
+  lastLogin?: Date;
+
+  @Prop()
+  resetPasswordOtp?: string;
+
+  @Prop()
+  resetPasswordExpires?: Date;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

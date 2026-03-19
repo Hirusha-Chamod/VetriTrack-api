@@ -7,12 +7,14 @@ import { User } from './schemas/user.schema';
 import { SignUpDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { MailerService } from '@nestjs-modules/mailer';
 
 @Injectable()
 export class AuthService {
   constructor(
     @InjectModel(User.name) private userModel: Model<User>,
     private jwtService: JwtService,
+    private mailerService: MailerService,
   ) {}
 
   async signUp(signUpDto: SignUpDto): Promise<{ message: string }> {
@@ -119,6 +121,34 @@ export class AuthService {
     return updatedUser!;
   }
 
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    const user = await this.userModel.findOne({ email });
+    if (!user) {
+      // Return success even if user not found to prevent email enumeration attacks
+      return { message: 'If that email exists, an OTP has been sent.' };
+    }
+
+    // Generate a 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Set expiration to 15 minutes from now
+    const expires = new Date();
+    expires.setMinutes(expires.getMinutes() + 15);
+
+    user.resetPasswordOtp = otp;
+    user.resetPasswordExpires = expires;
+    await user.save();
+
+    // 👇 Fire off the actual email in the background!
+    this.mailerService.sendMail({
+      to: user.email,
+      subject: 'VetriTrack - Password Reset Verification Code',
+      text: `Hello ${user.fullName},\n\nWe received a request to reset your VetriTrack password.\n\nYour 6-digit verification code is: ${otp}\n\nThis code will expire in 15 minutes.\n\nIf you did not request a password reset, please ignore this email or contact your administrator.\n\nThank you,\nVetriTrack Security`,
+    }).catch(err => console.error('Failed to send OTP email in background:', err));
+
+    return { message: 'If that email exists, an OTP has been sent.' };
+  }
+
   async deactivateUser(id: string): Promise<{ message: string }> {
     const user = await this.userModel.findById(id);
 
@@ -131,4 +161,42 @@ export class AuthService {
 
     return { message: 'User deactivated successfully' };
   }
+
+  async verifyOtp(email: string, otp: string): Promise<{ isValid: boolean; message: string }> {
+    const user = await this.userModel.findOne({
+      email,
+      resetPasswordOtp: otp,
+      resetPasswordExpires: { $gt: new Date() } // Ensure it hasn't expired
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid or expired OTP');
+    }
+
+    return { isValid: true, message: 'OTP verified successfully' };
+  }
+
+  async resetPassword(email: string, otp: string, newPassword: string): Promise<{ message: string }> {
+    const user = await this.userModel.findOne({
+      email,
+      resetPasswordOtp: otp,
+      resetPasswordExpires: { $gt: new Date() }
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid or expired OTP');
+    }
+
+    // Hash new password
+    user.password = await bcrypt.hash(newPassword, 10);
+    
+    // Clear the OTP fields so they can't be reused
+    user.resetPasswordOtp = undefined;
+    user.resetPasswordExpires = undefined;
+    
+    await user.save();
+
+    return { message: 'Password has been successfully reset' };
+  }
+
 }

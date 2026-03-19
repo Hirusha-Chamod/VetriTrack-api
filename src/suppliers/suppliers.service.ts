@@ -12,35 +12,33 @@ export class SuppliersService {
     @InjectModel(Supplier.name) private supplierModel: Model<Supplier>,
   ) {}
 
-  // Registers a new supplier and checks if the name already exists
   async create(dto: CreateSupplierDto) {
-    const existing = await this.supplierModel.findOne({ supplierName: dto.supplierName });
+    // Check for both name AND email to prevent duplicates
+    const existing = await this.supplierModel.findOne({
+      $or: [{ supplierName: dto.supplierName }, { email: dto.email }]
+    });
     if (existing) {
-      throw new ConflictException('Supplier name already exists');
+      throw new ConflictException('Supplier name or email already exists');
     }
     return await this.supplierModel.create(dto);
   }
 
-  // Returns all suppliers (useful for dropdowns in Add Batch/Approvals)
   async findAll() {
     return await this.supplierModel.find().sort({ supplierName: 1 }).exec();
   }
 
-  // Finds a specific supplier by ID
   async findOne(id: string) {
     const supplier = await this.supplierModel.findById(id).exec();
     if (!supplier) throw new NotFoundException('Supplier not found');
     return supplier;
   }
 
-  // Updates supplier details (Contact info, Address, etc.)
   async update(id: string, dto: UpdateSupplierDto) {
     const updated = await this.supplierModel.findByIdAndUpdate(id, dto, { new: true });
     if (!updated) throw new NotFoundException('Supplier not found');
     return updated;
   }
 
-  // Specific method to change status (Active/Inactive) from the mobile view
   async updateStatus(id: string, status: 'Active' | 'Inactive') {
     const updated = await this.supplierModel.findByIdAndUpdate(
       id,
@@ -51,43 +49,77 @@ export class SuppliersService {
     return updated;
   }
 
-  // Removes a supplier from the system
   async remove(id: string) {
     const result = await this.supplierModel.findByIdAndDelete(id);
     if (!result) throw new NotFoundException('Supplier not found');
     return { deleted: true };
   }
 
+  // ─── IMPORT LOGIC (SMART UPSERT) ──────────────────────────────────────────
   async importFromBuffer(buffer: Buffer) {
     try {
-      // Read the buffer (works for both .csv and .xlsx)
       const workbook = XLSX.read(buffer, { type: 'buffer' });
-      
-      // Get the first sheet
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-
-      // Convert sheet to JSON array
       const rawData = XLSX.utils.sheet_to_json(worksheet);
 
-      // Map and Validate the data
       const mappedSuppliers = rawData.map(row => this.mapRowToSchema(row));
 
-      // Bulk Insert
-      return await this.supplierModel.insertMany(mappedSuppliers);
+      // Use bulkWrite for "Upserting" based on unique email
+      const operations = mappedSuppliers.map(supplier => ({
+        updateOne: {
+          filter: { email: supplier.email }, // Match by email
+          update: { $set: supplier },        // Update fields if exists
+          upsert: true                       // Insert if it doesn't exist
+        }
+      }));
+
+      const result = await this.supplierModel.bulkWrite(operations);
+      
+      return { 
+        success: true, 
+        message: `Successfully processed ${mappedSuppliers.length} suppliers.`,
+        inserted: result.upsertedCount,
+        updated: result.modifiedCount
+      };
     } catch (error) {
-      throw new BadRequestException('Failed to parse file. Ensure headers match the template.');
+      throw new BadRequestException('Failed to process file. Ensure emails are present and valid.');
     }
   }
 
   private mapRowToSchema(data: any) {
+    // Fixed to perfectly match your Schema property names!
     return {
-      supplierName: data['Name'] || data['Supplier Name'],
-      contactPerson: data['Contact'] || data['Contact Person'],
-      email: data['Email'],
-      phone: data['Phone'] || data['Telephone'],
-      leadTime: parseInt(data['LeadTime'] || data['Lead Time']) || 3,
+      supplierName: data['Supplier Name'] || data['Name'] || 'Unknown Supplier',
+      contactName: data['Contact Name'] || data['Contact Person'] || data['Contact'] || 'Unknown',
+      email: data['Email'], // Email is critical for the upsert logic
+      phone: data['Phone'] || data['Telephone'] || 'N/A',
+      address: data['Address'] || 'N/A',
+      averageLeadTimeDays: parseInt(data['Lead Time'] || data['LeadTime']) || 3,
       status: 'Active',
     };
+  }
+
+  // ─── EXPORT LOGIC ─────────────────────────────────────────────────────────
+  async exportToExcel(): Promise<Buffer> {
+    const suppliers = await this.supplierModel.find().lean();
+    
+    // Format data cleanly for the Excel file
+    const exportData = suppliers.map(s => ({
+      'Supplier Name': s.supplierName,
+      'Contact Name': s.contactName,
+      'Email': s.email,
+      'Phone': s.phone,
+      'Address': s.address,
+      'Lead Time': s.averageLeadTimeDays,
+      'Status': s.status,
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Suppliers');
+    
+    // Return as a Buffer so the controller can send it as a file download
+    return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
   }
 }

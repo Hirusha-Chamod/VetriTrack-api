@@ -39,6 +39,12 @@ export class PurchaseOrder extends Document {
 
   @Prop()
   notes?: string;
+
+  @Prop()
+  sentAt?: Date;
+
+  @Prop()
+  lastReminderSentAt?: Date;
 }
 
 export const PurchaseOrderSchema = SchemaFactory.createForClass(PurchaseOrder);

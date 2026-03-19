@@ -56,4 +56,9 @@ export class PurchaseOrdersController {
   ) {
     return this.poService.receiveItems(id, itemId, quantity);
   }
+
+  @Post(':id/remind')
+  async sendReminderEmail(@Param('id') id: string) {
+    return await this.poService.sendReminder(id);
+  }
 }

@@ -3,14 +3,15 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { PurchaseOrdersController } from './purchase-orders.controller';
 import { PurchaseOrder, PurchaseOrderSchema } from './schemas/purschase-order.schema';
+import { Supplier, SupplierSchema } from 'src/suppliers/schema/supplier.schema';
 
 
 @Module({
   imports: [
-    // Connects the schema to the Mongoose database
-    MongooseModule.forFeature([
-      { name: PurchaseOrder.name, schema: PurchaseOrderSchema }
-    ]),
+     MongooseModule.forFeature([
+  { name: PurchaseOrder.name, schema: PurchaseOrderSchema },
+  { name: Supplier.name, schema: SupplierSchema }
+]),
   ],
   controllers: [PurchaseOrdersController],
   providers: [PurchaseOrdersService],

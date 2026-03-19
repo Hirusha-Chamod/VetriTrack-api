@@ -1,16 +1,19 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { InventoryItem } from './schemas/inventory-item.schema';
 import { StockBatch } from './schemas/stock-batch.schema';
 import { CreateItemDto } from './dto/create-item.dto';
 import { AddBatchDto } from './dto/add-batch.dto';
+import { Supplier } from 'src/suppliers/schema/supplier.schema';
+import * as XLSX from 'xlsx';
 
 @Injectable()
 export class InventoryService {
   constructor(
     @InjectModel(InventoryItem.name) private itemModel: Model<InventoryItem>,
     @InjectModel(StockBatch.name) private batchModel: Model<StockBatch>,
+    @InjectModel(Supplier.name) private supplierModel: Model<Supplier>,
   ) {}
 
   async createItem(dto: CreateItemDto) {
@@ -21,34 +24,100 @@ export class InventoryService {
     return await this.batchModel.create(dto);
   }
 
-async findAllItems() {
-    // 1. Fetch all items as plain JavaScript objects
-    const items = await this.itemModel.find().sort({ itemName: 1 }).lean().exec();
+async findAllItems(query: any = {}) {
+    const { category, stockStatus, expiryStatus, sort } = query;
+    console.log(`\n--- Fetching Inventory Items ---`);
+    console.log('1. Received query params:', query);
 
-    // 2. Loop through each item and calculate its total stock
-    const itemsWithStock = await Promise.all(
+    // 1. Initial Database Match (Filter by Category if provided)
+    const match: any = {};
+    if (category && category !== 'all') {
+      match.category = { $regex: new RegExp(`^${category}$`, 'i') };
+      console.log(`2. Applying category match regex:`, match.category);
+    } else {
+      console.log(`2. No specific category filter applied.`);
+    }
+
+    const items = await this.itemModel.find(match).lean().exec();
+    console.log(`3. Found ${items.length} items in DB after category filter.`);
+
+    const now = new Date();
+    const thirtyDaysFromNow = new Date();
+    thirtyDaysFromNow.setDate(now.getDate() + 30);
+
+    // 2. Loop, Calculate Stock, and Find Nearest Expiry
+    let processedItems = await Promise.all(
       items.map(async (item) => {
-        // 🔥 FIXED: Search for BOTH the ObjectId and the plain string!
         const batches = await this.batchModel.find({ 
-          $or: [
-            { itemId: item._id },
-            { itemId: item._id.toString() } 
-          ]
+          $or: [{ itemId: item._id }, { itemId: item._id.toString() }] 
         });
         
-        // Add up the quantityOnHand from all active batches
+        // Add up current stock
         const currentStock = batches.reduce((sum, batch) => sum + batch.quantityOnHand, 0);
         
-        return {
-          ...item,
-          currentStock,
-        };
+        // Find nearest expiry status among active batches
+        const activeBatches = batches.filter(b => b.quantityOnHand > 0);
+        let nearestExpiry: Date | null = null;
+        let itemExpiryStatus = 'good'; 
+
+        if (activeBatches.length > 0) {
+          nearestExpiry = activeBatches.reduce(
+            (min, b) => (b.expiryDate < min ? b.expiryDate : min), 
+            activeBatches[0].expiryDate
+          );
+
+          if (nearestExpiry <= now) {
+            itemExpiryStatus = 'expired';
+          } else if (nearestExpiry <= thirtyDaysFromNow) {
+            itemExpiryStatus = 'expiring-soon';
+          }
+        }
+
+        return { ...item, currentStock, nearestExpiry, itemExpiryStatus };
       })
     );
 
-    return itemsWithStock;
-  }
+    console.log(`4. Processed stock & expiry statuses for ${processedItems.length} items.`);
 
+    // 3. Apply Post-Calculation Filters
+    if (stockStatus && stockStatus !== 'all') {
+      const beforeCount = processedItems.length;
+      processedItems = processedItems.filter(item => {
+        if (stockStatus === 'low-stock') return item.currentStock <= item.minStockLevel;
+        if (stockStatus === 'in-stock') return item.currentStock > item.minStockLevel;
+        return true;
+      });
+      console.log(`5. Applied stockStatus '${stockStatus}': Kept ${processedItems.length} out of ${beforeCount} items.`);
+    } else {
+      console.log(`5. No stockStatus filter applied.`);
+    }
+
+    if (expiryStatus && expiryStatus !== 'all') {
+      const beforeCount = processedItems.length;
+      processedItems = processedItems.filter(item => item.itemExpiryStatus === expiryStatus);
+      console.log(`6. Applied expiryStatus '${expiryStatus}': Kept ${processedItems.length} out of ${beforeCount} items.`);
+    } else {
+      console.log(`6. No expiryStatus filter applied.`);
+    }
+
+    // 4. Apply Sorting
+    processedItems.sort((a, b) => {
+      if (sort === 'stock-asc') {
+        return a.currentStock - b.currentStock;
+      } else if (sort === 'expiry-asc') {
+        if (!a.nearestExpiry && !b.nearestExpiry) return 0;
+        if (!a.nearestExpiry) return 1; // Push items without expiry dates to the bottom
+        if (!b.nearestExpiry) return -1;
+        return a.nearestExpiry.getTime() - b.nearestExpiry.getTime();
+      }
+      // Default: name-asc
+      return a.itemName.localeCompare(b.itemName);
+    });
+
+    console.log(`7. Sorted by '${sort || 'name-asc'}'. Returning ${processedItems.length} final items.\n--------------------------------`);
+
+    return processedItems;
+  }
   async findBatchesByItem(itemId: string) {
     return await this.batchModel
       .find({ itemId })
@@ -154,5 +223,150 @@ async findAllItems() {
     }
 
     return { expiringSoon, expired };
+  }
+
+  // ─── IMPORT LOGIC (ITEMS + BATCHES + SUPPLIERS) ───────────────────────────
+  async importFromBuffer(buffer: Buffer) {
+    try {
+      const workbook = XLSX.read(buffer, { type: 'buffer' });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rawData = XLSX.utils.sheet_to_json(worksheet);
+
+      let itemsProcessed = 0;
+      let batchesProcessed = 0;
+
+      for (const row of rawData as any[]) {
+        // 1. Extract Item Data
+        const itemCode = row['Item Code'];
+        if (!itemCode) continue; // Skip empty rows
+
+        // 2. Upsert Inventory Item
+        const itemData = {
+          itemCode: String(itemCode),
+          itemName: row['Item Name'] || 'Unknown Item',
+          category: row['Category'] || 'Uncategorized',
+          unitOfMeasure: row['Unit'] || 'units',
+          minStockLevel: parseInt(row['Min Stock']) || 0,
+          unitPrice: parseFloat(row['Unit Price']) || 0,
+        };
+
+        const item = await this.itemModel.findOneAndUpdate(
+          { itemCode: itemData.itemCode },
+          { $set: itemData },
+          { new: true, upsert: true }
+        );
+        itemsProcessed++;
+
+        // 3. Process Batch Data (If provided)
+        const batchCode = row['Batch Code'];
+        const supplierEmail = row['Supplier Email'];
+        const expiryRaw = row['Expiry Date']; // 👈 Note: Changed to expiryRaw
+        const qty = parseInt(row['Quantity']) || 0;
+
+        if (batchCode && supplierEmail && expiryRaw) {
+          // Look up supplier by exact email match
+          const supplier = await this.supplierModel.findOne({ email: supplierEmail });
+          
+          if (supplier) {
+            
+            // 👇 THE DATE FIX: Handle both Excel Serial Numbers AND normal Strings
+            let finalExpiryDate: Date;
+            if (typeof expiryRaw === 'number') {
+              // Convert Excel serial date to an actual Javascript Date
+              finalExpiryDate = new Date(Math.round((expiryRaw - 25569) * 86400 * 1000));
+            } else {
+              // It's a normal string (like "2026-10-15")
+              finalExpiryDate = new Date(expiryRaw);
+            }
+
+            // Upsert the Batch
+            await this.batchModel.findOneAndUpdate(
+              { itemId: item._id, batchCode: String(batchCode) },
+              {
+                $set: {
+                  expiryDate: finalExpiryDate,
+                  quantityOnHand: qty,
+                  supplier: supplier._id,
+                }
+              },
+              { upsert: true }
+            );
+            batchesProcessed++;
+          } else {
+            console.warn(`Skipped batch ${batchCode}: Supplier email ${supplierEmail} not found.`);
+          }
+        }
+      }
+
+      return { 
+        success: true, 
+        message: `Imported/Updated ${itemsProcessed} items and ${batchesProcessed} stock batches.` 
+      };
+
+    } catch (error) {
+      console.error(error);
+      throw new BadRequestException('Failed to process inventory file. Check date formats and required columns.');
+    }
+  }
+
+  // ─── EXPORT LOGIC ─────────────────────────────────────────────────────────
+  async exportToExcel(): Promise<Buffer> {
+    // Get all batches with their Item and Supplier populated
+    const batches = await this.batchModel
+      .find()
+      .populate('itemId')
+      .populate('supplier')
+      .lean();
+
+    // Find items that have NO batches yet (so they still show up in the export)
+    const itemsWithBatches = batches.map(b => (b.itemId as any)?._id?.toString());
+    const orphanedItems = await this.itemModel.find({ _id: { $nin: itemsWithBatches } }).lean();
+
+    const exportData: any[] = [];
+
+    // 1. Push all Batch rows
+    batches.forEach(b => {
+      const item = b.itemId as any;
+      const sup = b.supplier as any;
+      if (!item) return;
+
+      exportData.push({
+        'Item Code': item.itemCode,
+        'Item Name': item.itemName,
+        'Category': item.category,
+        'Unit': item.unitOfMeasure,
+        'Min Stock': item.minStockLevel,
+        'Unit Price': item.unitPrice,
+        'Batch Code': b.batchCode,
+        'Quantity': b.quantityOnHand,
+        'Expiry Date': new Date(b.expiryDate).toISOString().split('T')[0],
+        'Supplier Email': sup?.email || 'N/A',
+      });
+    });
+
+    // 2. Push Orphaned Items (Items with no stock/batches)
+    orphanedItems.forEach(item => {
+      exportData.push({
+        'Item Code': item.itemCode,
+        'Item Name': item.itemName,
+        'Category': item.category,
+        'Unit': item.unitOfMeasure,
+        'Min Stock': item.minStockLevel,
+        'Unit Price': item.unitPrice,
+        'Batch Code': '',
+        'Quantity': 0,
+        'Expiry Date': '',
+        'Supplier Email': '',
+      });
+    });
+
+    // Sort alphabetically by Item Name
+    exportData.sort((a, b) => a['Item Name'].localeCompare(b['Item Name']));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Inventory');
+    
+    return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
   }
 }

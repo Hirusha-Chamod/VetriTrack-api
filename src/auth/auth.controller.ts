@@ -44,4 +44,23 @@ export class AuthController {
   deactivateUser(@Param('id') id: string) {
     return this.authService.deactivateUser(id);
   }
+
+  @Post('/forgot-password')
+  forgotPassword(@Body('email') email: string) {
+    return this.authService.forgotPassword(email);
+  }
+
+  @Post('/verify-otp')
+  verifyOtp(@Body('email') email: string, @Body('otp') otp: string) {
+    return this.authService.verifyOtp(email, otp);
+  }
+
+  @Post('/reset-password')
+  resetPassword(
+    @Body('email') email: string, 
+    @Body('otp') otp: string, 
+    @Body('newPassword') newPassword: string
+  ) {
+    return this.authService.resetPassword(email, otp, newPassword);
+  }
 }

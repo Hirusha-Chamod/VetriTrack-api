@@ -1,11 +1,26 @@
-import { Controller, Get, Post, Body, Patch, Param, UseGuards } from '@nestjs/common';
+import { 
+  Controller, 
+  Get, 
+  Post, 
+  Body, 
+  Patch, 
+  Param, 
+  UseGuards, 
+  Query, 
+  Res, 
+  UseInterceptors, 
+  UploadedFile, 
+  BadRequestException 
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import express from 'express';
+
 import { InventoryService } from './inventory.service';
 import { AuthGuard } from '@nestjs/passport';
 import { AddBatchDto } from './dto/add-batch.dto';
 import { CreateItemDto } from './dto/create-item.dto';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import { RolesGuard } from 'src/auth/guards/roles.guard';
-
 @Controller('inventory')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 export class InventoryController {
@@ -25,8 +40,8 @@ export class InventoryController {
 
   @Get('items')
   @Roles('owner', 'staff')
-  findAll() {
-    return this.inventoryService.findAllItems();
+  findAll(@Query() query: any) { 
+    return this.inventoryService.findAllItems(query);
   }
 
   @Get('expiry-report')
@@ -60,5 +75,39 @@ export class InventoryController {
   @Roles('owner', 'staff')
   getItemBatches(@Param('itemId') itemId: string) {
     return this.inventoryService.findBatchesByItem(itemId);
+  }
+
+
+  @Get('export/excel')
+  @Roles('owner', 'staff')
+  async exportExcel(@Res() res: express.Response) {
+    const buffer = await this.inventoryService.exportToExcel();
+    
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename="vetritrack_inventory.xlsx"',
+    });
+    
+    res.send(buffer);
+  }
+
+  
+  @Post('upload')
+  @Roles('owner', 'staff')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadInventory(@UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('Please upload a file');
+
+    const allowedMimeTypes = [
+      'text/csv',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
+      'application/vnd.ms-excel', 
+    ];
+
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      throw new BadRequestException('Invalid file type. Please upload a .csv or .xlsx file.');
+    }
+
+    return await this.inventoryService.importFromBuffer(file.buffer);
   }
 }
