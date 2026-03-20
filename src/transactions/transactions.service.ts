@@ -18,14 +18,28 @@ async create(createDto: CreateTransactionDto, userId: string) {
 
       // 👇 Force the string into a true MongoDB ObjectId right away
       const objectIdItemId = new Types.ObjectId(itemId);
+      
+      console.log('\n--- 🔍 TRANSACTION DEBUG START ---');
+      console.log(`Type: ${type} | Requested Qty: ${quantity}`);
+      console.log(`Raw itemId string: ${itemId}`);
+      console.log(`Converted ObjectId: ${objectIdItemId}`);
 
       // ─── 1. TRUE FEFO ISSUE LOGIC (Multi-Batch Support) ─────────────────────
       if (type === 'ISSUE' && !batchId) {
         
+        // DEBUG STEP 1: Find ALL batches for this item regardless of stock
+        const debugAllBatches = await this.batchModel.find({ itemId: objectIdItemId });
+        console.log(`\n[DEBUG] Total batches found for this item (ignoring stock level): ${debugAllBatches.length}`);
+        debugAllBatches.forEach(b => {
+            console.log(` -> Batch [${b.batchCode}]: ${b.quantityOnHand} on hand`);
+        });
+
         // Find ALL active batches using the true ObjectId
         const batches = await this.batchModel
           .find({ itemId: objectIdItemId, quantityOnHand: { $gt: 0 } })
           .sort({ expiryDate: 1 }); // Sort oldest expiry first!
+
+        console.log(`\n[DEBUG] Batches found with > 0 stock: ${batches.length}`);
 
         if (batches.length === 0) {
           throw new BadRequestException('No suitable batch found with available stock');
@@ -33,6 +47,8 @@ async create(createDto: CreateTransactionDto, userId: string) {
 
         // Check if we have enough total stock across all batches
         const totalAvailable = batches.reduce((sum, b) => sum + b.quantityOnHand, 0);
+        console.log(`[DEBUG] Total available across all valid batches: ${totalAvailable}`);
+
         if (totalAvailable < quantity) {
           throw new BadRequestException(`Insufficient stock. You requested ${quantity}, but only have ${totalAvailable} available.`);
         }
@@ -45,6 +61,8 @@ async create(createDto: CreateTransactionDto, userId: string) {
           if (remainingToIssue <= 0) break; // Stop when we've fulfilled the request
 
           const deductQty = Math.min(batch.quantityOnHand, remainingToIssue);
+          console.log(`[DEBUG] Deducting ${deductQty} from batch ${batch.batchCode}`);
+          
           batch.quantityOnHand -= deductQty;
           remainingToIssue -= deductQty;
 
@@ -62,7 +80,9 @@ async create(createDto: CreateTransactionDto, userId: string) {
         }
 
         // Save all the transaction logs and return
-        return await this.transactionModel.insertMany(transactionsToLog);
+        const savedTransactions = await this.transactionModel.insertMany(transactionsToLog);
+        console.log('--- 🔍 TRANSACTION DEBUG END ---\n');
+        return savedTransactions;
       }
 
       // ─── 2. RECEIVE & MANUAL ADJUSTMENT LOGIC ───────────────────────────────
@@ -91,35 +111,62 @@ async create(createDto: CreateTransactionDto, userId: string) {
         }
       } 
       else {
-        // This is a manual ADJUSTMENT targeting a specific batch ID
-        if (!batchId) throw new BadRequestException('Batch ID is required for adjustments');
-        batch = await this.batchModel.findById(batchId);
-        if (!batch) throw new BadRequestException('Target batch not found');
+        // This is a manual ADJUSTMENT
+        if (batchId) {
+          // If the frontend passed a specific batch (e.g. from an item detail page), use it
+          batch = await this.batchModel.findById(batchId);
+          if (!batch) throw new BadRequestException('Target batch not found');
+        } else {
+          // AUTO-PILOT: The frontend didn't pass a batch, so we find one automatically.
+          // We look for the oldest expiring batch that actually has stock.
+          const batches = await this.batchModel
+            .find({ itemId: objectIdItemId, quantityOnHand: { $gt: 0 } })
+            .sort({ expiryDate: 1 });
+            
+          if (batches.length === 0) {
+            throw new BadRequestException(
+              'No active batches found for this item. If you are trying to add brand new stock, please use "Receive Stock" instead.'
+            );
+          }
+          
+          // Grab the first available batch
+          batch = batches[0]; 
+        }
       }
 
       // Apply the math
       if (type === 'RECEIVE') {
         batch.quantityOnHand += quantity;
-      } else if (type === 'ADJUSTMENT') {
+      }else if (type === 'ADJUSTMENT') {
         if (!reason) throw new BadRequestException('Reason required for adjustments');
+        
+        if (batch.quantityOnHand + quantity < 0) {
+          throw new BadRequestException(
+            `Adjustment failed. This specific batch only has ${batch.quantityOnHand} units available.`
+          );
+        }
+        
         batch.quantityOnHand += quantity; // UI can send negative quantity for deductions
       }
 
       await batch.save();
 
       // Log single transaction
-      return await this.transactionModel.create({
+      const savedTx = await this.transactionModel.create({
         ...createDto,
         itemId: objectIdItemId, // 👈 Overwrite the string itemId from createDto with the true ObjectId!
         batchId: batch._id,
         performedBy: userId,
       });
 
+      console.log('--- 🔍 TRANSACTION DEBUG END ---\n');
+      return savedTx;
+
     } catch (error: any) {
       console.error("🔥 TRANSACTION FAILED 🔥:", error.message || error);
       throw error; 
     }
-  }
+}
 
   async findAll() {
     return this.transactionModel.find()

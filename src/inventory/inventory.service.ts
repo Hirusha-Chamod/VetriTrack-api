@@ -7,6 +7,7 @@ import { CreateItemDto } from './dto/create-item.dto';
 import { AddBatchDto } from './dto/add-batch.dto';
 import { Supplier } from 'src/suppliers/schema/supplier.schema';
 import * as XLSX from 'xlsx';
+import { SettingsService } from 'src/settings/settings.service';
 
 @Injectable()
 export class InventoryService {
@@ -14,6 +15,7 @@ export class InventoryService {
     @InjectModel(InventoryItem.name) private itemModel: Model<InventoryItem>,
     @InjectModel(StockBatch.name) private batchModel: Model<StockBatch>,
     @InjectModel(Supplier.name) private supplierModel: Model<Supplier>,
+    private settingsService: SettingsService,
   ) {}
 
   async createItem(dto: CreateItemDto) {
@@ -26,37 +28,32 @@ export class InventoryService {
 
 async findAllItems(query: any = {}) {
     const { category, stockStatus, expiryStatus, sort } = query;
-    console.log(`\n--- Fetching Inventory Items ---`);
-    console.log('1. Received query params:', query);
+    
+    // 👇 1. FETCH DYNAMIC SETTINGS FIRST
+    const settings = await this.settingsService.getSettings();
+    const expiryThresholdDays = settings.expiryAlertDays; 
 
-    // 1. Initial Database Match (Filter by Category if provided)
     const match: any = {};
     if (category && category !== 'all') {
       match.category = { $regex: new RegExp(`^${category}$`, 'i') };
-      console.log(`2. Applying category match regex:`, match.category);
-    } else {
-      console.log(`2. No specific category filter applied.`);
-    }
+    } 
 
     const items = await this.itemModel.find(match).lean().exec();
-    console.log(`3. Found ${items.length} items in DB after category filter.`);
 
     const now = new Date();
-    const thirtyDaysFromNow = new Date();
-    thirtyDaysFromNow.setDate(now.getDate() + 30);
+    // 👇 2. USE THE DYNAMIC THRESHOLD
+    const expiryThresholdDate = new Date();
+    expiryThresholdDate.setDate(now.getDate() + expiryThresholdDays);
 
-    // 2. Loop, Calculate Stock, and Find Nearest Expiry
     let processedItems = await Promise.all(
       items.map(async (item) => {
         const batches = await this.batchModel.find({ 
           $or: [{ itemId: item._id }, { itemId: item._id.toString() }] 
         });
         
-        // Add up current stock
         const currentStock = batches.reduce((sum, batch) => sum + batch.quantityOnHand, 0);
-        
-        // Find nearest expiry status among active batches
         const activeBatches = batches.filter(b => b.quantityOnHand > 0);
+        
         let nearestExpiry: Date | null = null;
         let itemExpiryStatus = 'good'; 
 
@@ -68,7 +65,7 @@ async findAllItems(query: any = {}) {
 
           if (nearestExpiry <= now) {
             itemExpiryStatus = 'expired';
-          } else if (nearestExpiry <= thirtyDaysFromNow) {
+          } else if (nearestExpiry <= expiryThresholdDate) { // 👈 DYNAMIC CHECK
             itemExpiryStatus = 'expiring-soon';
           }
         }
@@ -77,47 +74,35 @@ async findAllItems(query: any = {}) {
       })
     );
 
-    console.log(`4. Processed stock & expiry statuses for ${processedItems.length} items.`);
-
-    // 3. Apply Post-Calculation Filters
+    // Apply Post-Calculation Filters
     if (stockStatus && stockStatus !== 'all') {
-      const beforeCount = processedItems.length;
       processedItems = processedItems.filter(item => {
         if (stockStatus === 'low-stock') return item.currentStock <= item.minStockLevel;
         if (stockStatus === 'in-stock') return item.currentStock > item.minStockLevel;
         return true;
       });
-      console.log(`5. Applied stockStatus '${stockStatus}': Kept ${processedItems.length} out of ${beforeCount} items.`);
-    } else {
-      console.log(`5. No stockStatus filter applied.`);
     }
 
     if (expiryStatus && expiryStatus !== 'all') {
-      const beforeCount = processedItems.length;
       processedItems = processedItems.filter(item => item.itemExpiryStatus === expiryStatus);
-      console.log(`6. Applied expiryStatus '${expiryStatus}': Kept ${processedItems.length} out of ${beforeCount} items.`);
-    } else {
-      console.log(`6. No expiryStatus filter applied.`);
-    }
+    } 
 
-    // 4. Apply Sorting
+    // Apply Sorting
     processedItems.sort((a, b) => {
       if (sort === 'stock-asc') {
         return a.currentStock - b.currentStock;
       } else if (sort === 'expiry-asc') {
         if (!a.nearestExpiry && !b.nearestExpiry) return 0;
-        if (!a.nearestExpiry) return 1; // Push items without expiry dates to the bottom
+        if (!a.nearestExpiry) return 1;
         if (!b.nearestExpiry) return -1;
         return a.nearestExpiry.getTime() - b.nearestExpiry.getTime();
       }
-      // Default: name-asc
       return a.itemName.localeCompare(b.itemName);
     });
 
-    console.log(`7. Sorted by '${sort || 'name-asc'}'. Returning ${processedItems.length} final items.\n--------------------------------`);
-
     return processedItems;
   }
+
   async findBatchesByItem(itemId: string) {
     return await this.batchModel
       .find({ itemId })
@@ -182,8 +167,10 @@ async findAllItems(query: any = {}) {
 
   async getExpiryReport() {
     const today = new Date();
-    const thirtyDaysFromNow = new Date();
-    thirtyDaysFromNow.setDate(today.getDate() + 30);
+    
+    // 👇 1. FETCH DYNAMIC SETTINGS
+    const settings = await this.settingsService.getSettings();
+    const expiryThresholdDays = settings.expiryAlertDays;
 
     const batches = await this.batchModel
       .find({ quantityOnHand: { $gt: 0 } })
@@ -205,6 +192,7 @@ async findAllItems(query: any = {}) {
       const value = batch.quantityOnHand * (item.unitPrice || 0);
 
       const mappedData = {
+        _id: batch._id.toString(),
         itemCode: item.itemCode,
         product: item.itemName,
         batchId: batch.batchCode,
@@ -217,7 +205,7 @@ async findAllItems(query: any = {}) {
 
       if (daysDiff <= 0) {
         expired.push({ ...mappedData, daysExpired: Math.abs(daysDiff) });
-      } else if (daysDiff <= 30) {
+      } else if (daysDiff <= expiryThresholdDays) { // 👇 2. DYNAMIC CHECK
         expiringSoon.push({ ...mappedData, daysUntilExpiry: daysDiff });
       }
     }
