@@ -18,7 +18,8 @@ export class AuthService {
   ) {}
 
   async signUp(signUpDto: SignUpDto): Promise<{ message: string }> {
-    const { fullName, username, email, password, role } = signUpDto;
+    
+    const { fullName, username, email, password, role, avatarUrl } = signUpDto;
 
     const userExists = await this.userModel.findOne({ 
       $or: [{ username }, { email }] 
@@ -36,13 +37,14 @@ export class AuthService {
       email, 
       password: hashedPassword,
       role,
-      status: 'active', // Default status for new users
+      avatarUrl, 
+      status: 'active', 
     });
 
     return { message: 'User registered successfully' };
   }
 
-  async login(loginDto: LoginDto): Promise<{ accessToken: string; user: { id: string; username: string; role: string } }> {
+  async login(loginDto: LoginDto): Promise<{ accessToken: string; user: { id: string; username: string; role: string; avatarUrl?: string } }> {
     const { username, password } = loginDto;
 
     const user = await this.userModel.findOne({ username }).select('+password');
@@ -56,19 +58,20 @@ export class AuthService {
       throw new UnauthorizedException('Invalid password');
     }
 
-    
     user.lastLogin = new Date();
     await user.save();
 
     const token = this.jwtService.sign({ id: user._id, role: user.role });
 
     return { 
-    accessToken: token, 
-    user: {
-      id: user._id.toString(),
-      username: user.username,
-      role: user.role 
-    } }
+      accessToken: token, 
+      user: {
+        id: user._id.toString(),
+        username: user.username,
+        role: user.role,
+        avatarUrl: user.avatarUrl 
+      } 
+    }
   }
 
   async getAllUsers(): Promise<User[]> {
@@ -87,7 +90,8 @@ export class AuthService {
   }
 
   async updateUser(id: string, updateUserDto: UpdateUserDto): Promise<User> {
-    const { fullName, email, role, password } = updateUserDto;
+    // 👇 Extract avatarUrl
+    const { fullName, email, role, password, avatarUrl } = updateUserDto;
 
     const user = await this.userModel.findById(id);
     
@@ -95,7 +99,6 @@ export class AuthService {
       throw new NotFoundException('User not found');
     }
 
-    // Check if email is already taken by another user
     if (email) {
       const existingUser = await this.userModel.findOne({ email, _id: { $ne: id } });
       if (existingUser) {
@@ -116,6 +119,11 @@ export class AuthService {
       user.password = await bcrypt.hash(password, 10);
     }
 
+    
+    if (avatarUrl) {
+      user.avatarUrl = avatarUrl;
+    }
+
     await user.save();
     const updatedUser = await this.userModel.findById(id).select('-password').exec();
     return updatedUser!;
@@ -124,14 +132,11 @@ export class AuthService {
   async forgotPassword(email: string): Promise<{ message: string }> {
     const user = await this.userModel.findOne({ email });
     if (!user) {
-      // Return success even if user not found to prevent email enumeration attacks
       return { message: 'If that email exists, an OTP has been sent.' };
     }
 
-    // Generate a 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     
-    // Set expiration to 15 minutes from now
     const expires = new Date();
     expires.setMinutes(expires.getMinutes() + 15);
 
@@ -139,7 +144,6 @@ export class AuthService {
     user.resetPasswordExpires = expires;
     await user.save();
 
-    // 👇 Fire off the actual email in the background!
     this.mailerService.sendMail({
       to: user.email,
       subject: 'VetriTrack - Password Reset Verification Code',
@@ -166,7 +170,7 @@ export class AuthService {
     const user = await this.userModel.findOne({
       email,
       resetPasswordOtp: otp,
-      resetPasswordExpires: { $gt: new Date() } // Ensure it hasn't expired
+      resetPasswordExpires: { $gt: new Date() }
     });
 
     if (!user) {
@@ -187,10 +191,8 @@ export class AuthService {
       throw new UnauthorizedException('Invalid or expired OTP');
     }
 
-    // Hash new password
     user.password = await bcrypt.hash(newPassword, 10);
     
-    // Clear the OTP fields so they can't be reused
     user.resetPasswordOtp = undefined;
     user.resetPasswordExpires = undefined;
     
@@ -198,5 +200,4 @@ export class AuthService {
 
     return { message: 'Password has been successfully reset' };
   }
-
 }

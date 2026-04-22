@@ -154,7 +154,7 @@ export class PurchaseOrdersService {
 
         supplier.averageLeadTimeDays = Math.round(newAvg);
         supplier.totalOrdersReceived = newTotalOrders;
-        supplier.leadTimeNotes = `${Math.round(newAvg)} days (Auto-calculated)`; 
+        supplier.leadTimeNotes = `${Math.round(newAvg)} days`; 
         
         await supplier.save();
       }

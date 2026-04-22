@@ -21,6 +21,9 @@ export class User extends Document {
   @Prop({ required: true, enum: ['active', 'inactive'], default: 'active' })
   status!: string;
 
+  @Prop({ required: false })
+  avatarUrl?: string;
+
   @Prop()
   lastLogin?: Date;
 

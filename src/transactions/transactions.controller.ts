@@ -1,28 +1,41 @@
-import { Controller, Post, Body, Get, UseGuards, Req } from '@nestjs/common';
+import { Controller, Post, Body, Get, UseGuards, Req, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
 import { TransactionsService } from './transactions.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import { RolesGuard } from 'src/auth/guards/roles.guard';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 @Controller('transactions')
-@UseGuards(AuthGuard('jwt'), RolesGuard)
+// @UseGuards(AuthGuard('jwt'), RolesGuard)
 export class TransactionsController {
   constructor(private readonly transactionsService: TransactionsService) {}
 
-  // Handles 'Receive Stock' and 'Issue Stock (FEFO)' - Owner and Staff
   @Post()
   @Roles('owner', 'staff')
   create(@Body() createDto: CreateTransactionDto, @Req() req: any) {
     return this.transactionsService.create(createDto, req.user.id);
   }
 
-  // Provides data for the Transaction History list - Owner only
   @Get()
-   @Roles('owner', 'staff')
+  @Roles('owner', 'staff')
   findAll() {
     return this.transactionsService.findAll();
   }
 
+  @Post('import')
+  @Roles('owner', 'staff')
+  @UseInterceptors(FileInterceptor('file'))
+  async importTransactions(@UploadedFile() file: Express.Multer.File, @Req() req: any) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+    return this.transactionsService.importFromBuffer(file.buffer, req.user.id);
+  }
 
+  @Get('seed')
+
+  seedHistoricalTransactions() {
+    return this.transactionsService.seedHistoricalTransactions();
+  }
 }

@@ -1,4 +1,4 @@
-import { IsEnum, IsNotEmpty, IsString, IsEmail, MinLength } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsString, IsEmail, MinLength, IsOptional } from 'class-validator';
 
 export class SignUpDto {
   @IsNotEmpty()
@@ -17,6 +17,10 @@ export class SignUpDto {
   @IsNotEmpty()
   @MinLength(6)
   password!: string;
+
+  @IsOptional()
+  @IsString()
+  avatarUrl?: string;
 
   
   @IsNotEmpty()

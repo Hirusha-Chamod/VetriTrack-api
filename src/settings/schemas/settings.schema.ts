@@ -7,7 +7,8 @@ export class SystemSettings extends Document {
   @Prop({ required: true, default: 'global', unique: true })
   settingId!: string;
 
-  @Prop({ required: true, default: 30 })
+  // 👇 Strict enforcement to protect the Multi-Model Python API
+  @Prop({ required: true, default: 30, enum: [30, 90, 180] })
   recommendationHorizonDays!: number;
 
   @Prop({ required: true, default: 7 })

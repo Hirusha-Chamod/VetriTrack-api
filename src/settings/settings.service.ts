@@ -11,7 +11,6 @@ export class SettingsService {
     @InjectModel(SystemSettings.name) private settingsModel: Model<SystemSettings>,
   ) {}
 
-  // Get the global settings (Create defaults if they don't exist yet)
   async getSettings(): Promise<SystemSettings> {
     let settings = await this.settingsModel.findOne({ settingId: 'global' });
     
@@ -25,12 +24,11 @@ export class SettingsService {
     return settings;
   }
 
-  // Update the global settings
   async updateSettings(updateDto: UpdateSettingsDto): Promise<SystemSettings> {
     const settings = await this.settingsModel.findOneAndUpdate(
       { settingId: 'global' },
       { $set: updateDto },
-      { new: true, upsert: true } // Upsert ensures it creates it if missing
+      { new: true, upsert: true } 
     );
     
     return settings;

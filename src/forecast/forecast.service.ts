@@ -6,7 +6,7 @@ import { firstValueFrom } from 'rxjs';
 import { InventoryItem } from '../inventory/schemas/inventory-item.schema';
 import { StockBatch } from '../inventory/schemas/stock-batch.schema';
 import { Transaction } from '../transactions/schemas/transaction.schema';
-import { SettingsService } from '../settings/settings.service'; // 👈 1. IMPORT THIS
+import { SettingsService } from '../settings/settings.service';
 
 @Injectable()
 export class ForecastService {
@@ -17,17 +17,13 @@ export class ForecastService {
     @InjectModel(StockBatch.name) private batchModel: Model<StockBatch>,
     @InjectModel(Transaction.name) private txModel: Model<Transaction>,
     private readonly httpService: HttpService,
-    private readonly settingsService: SettingsService, // 👈 2. INJECT THIS
+    private readonly settingsService: SettingsService,
   ) {}
 
   async getRecommendations() {
-    console.log('📊 Starting Smart Recommendations Gathering...');
-
-    // 👇 3. FETCH DYNAMIC HORIZON SETTING
     const settings = await this.settingsService.getSettings();
-    const horizonDays = settings.recommendationHorizonDays || 30; // Default to 30 if something goes wrong
-    
-    console.log(`⏳ Using Dynamic Forecast Horizon: ${horizonDays} days`);
+    const horizonDays = settings.recommendationHorizonDays || 30;
+    const expiryAlertDays = settings.expiryAlertDays || 7; 
 
     const items = await this.itemModel.find().lean();
     
@@ -36,7 +32,6 @@ export class ForecastService {
       .sort({ expiryDate: 1 })
       .lean();
 
-    // 👇 4. USE HORIZON INSTEAD OF 28
     const historicalStartDate = new Date();
     historicalStartDate.setDate(historicalStartDate.getDate() - horizonDays);
     historicalStartDate.setHours(0, 0, 0, 0);
@@ -47,10 +42,6 @@ export class ForecastService {
         createdAt: { $gte: historicalStartDate },
       })
       .lean();
-
-    console.log(`\n--- DEBUG FORECAST ---`);
-    console.log(`Date Threshold: >= ${historicalStartDate.toISOString()}`);
-    console.log(`Found ${transactions.length} ISSUE transactions in this date range.`);
 
     const txHistoryMap: Record<string, Record<string, number>> = {};
 
@@ -63,10 +54,7 @@ export class ForecastService {
       const qty = Math.abs(tx.quantity);
       txHistoryMap[itemId][dateKey] = (txHistoryMap[itemId][dateKey] || 0) + qty;
     });
-if (items.length > 0) {
-        const firstItemId = items[0]._id.toString();
-        console.log(`History Map for ${items[0].itemName}:`, txHistoryMap[firstItemId] || 'NO TRANSACTIONS FOUND');
-    }
+
     const forecastPayload = items.map((item) => {
       const itemIdStr = item._id.toString();
 
@@ -79,7 +67,6 @@ if (items.length > 0) {
         }));
 
       const demandHistory: number[] = [];
-      // 👇 5. DYNAMIC LOOP (e.g., if horizon is 90, loops from 89 down to 0)
       for (let i = horizonDays - 1; i >= 0; i--) {
         const d = new Date();
         d.setDate(d.getDate() - i);
@@ -87,10 +74,7 @@ if (items.length > 0) {
         
         demandHistory.push(txHistoryMap[itemIdStr]?.[dateKey] || 0);
       }
-if (item.itemCode === items[0].itemCode) {
-          console.log(`Final Array sent to Python for ${item.itemName}:`, demandHistory);
-          console.log(`--- END DEBUG ---\n`);
-      }
+
       return {
         itemCode: item.itemCode,
         itemName: item.itemName,
@@ -104,21 +88,17 @@ if (item.itemCode === items[0].itemCode) {
     });
 
     try {
-      console.log('🚀 Sending payload to Python ML API...');
-      
-      // Included horizonDays in the root payload just in case your Python script wants to know!
       const response = await firstValueFrom(
         this.httpService.post(this.PYTHON_API_URL, { 
           horizon_days: horizonDays, 
+          expiry_alert_days: expiryAlertDays,
           items: forecastPayload 
         }),
       );
       
-      console.log(`✅ Received ${response.data.length} recommendations from ML API!`);
       return response.data; 
       
     } catch (error: any) { 
-      console.error('❌ Failed to reach Python API:', error.message);
       throw new InternalServerErrorException('Forecasting engine is currently unavailable.');
     }
   }

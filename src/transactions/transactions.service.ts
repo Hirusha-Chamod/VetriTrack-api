@@ -4,50 +4,34 @@ import { Model, Types } from 'mongoose';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { StockBatch } from '../inventory/schemas/stock-batch.schema';
 import { Transaction } from './schemas/transaction.schema';
+import { InventoryItem } from '../inventory/schemas/inventory-item.schema';
+import { Supplier } from '../suppliers/schema/supplier.schema';
+import * as XLSX from 'xlsx';
 
 @Injectable()
 export class TransactionsService {
   constructor(
     @InjectModel(Transaction.name) private transactionModel: Model<Transaction>,
     @InjectModel(StockBatch.name) private batchModel: Model<StockBatch>,
+    @InjectModel(InventoryItem.name) private itemModel: Model<InventoryItem>,
+    @InjectModel(Supplier.name) private supplierModel: Model<Supplier>,
   ) {}
 
-async create(createDto: CreateTransactionDto, userId: string) {
+  async create(createDto: CreateTransactionDto, userId: string) {
     try {
       const { itemId, batchId, quantity, type, batchLotNumber, expiryDate, supplierId, reason } = createDto;
-
-      // 👇 Force the string into a true MongoDB ObjectId right away
       const objectIdItemId = new Types.ObjectId(itemId);
       
-      console.log('\n--- 🔍 TRANSACTION DEBUG START ---');
-      console.log(`Type: ${type} | Requested Qty: ${quantity}`);
-      console.log(`Raw itemId string: ${itemId}`);
-      console.log(`Converted ObjectId: ${objectIdItemId}`);
-
-      // ─── 1. TRUE FEFO ISSUE LOGIC (Multi-Batch Support) ─────────────────────
       if (type === 'ISSUE' && !batchId) {
-        
-        // DEBUG STEP 1: Find ALL batches for this item regardless of stock
-        const debugAllBatches = await this.batchModel.find({ itemId: objectIdItemId });
-        console.log(`\n[DEBUG] Total batches found for this item (ignoring stock level): ${debugAllBatches.length}`);
-        debugAllBatches.forEach(b => {
-            console.log(` -> Batch [${b.batchCode}]: ${b.quantityOnHand} on hand`);
-        });
-
-        // Find ALL active batches using the true ObjectId
         const batches = await this.batchModel
           .find({ itemId: objectIdItemId, quantityOnHand: { $gt: 0 } })
-          .sort({ expiryDate: 1 }); // Sort oldest expiry first!
-
-        console.log(`\n[DEBUG] Batches found with > 0 stock: ${batches.length}`);
+          .sort({ expiryDate: 1 });
 
         if (batches.length === 0) {
           throw new BadRequestException('No suitable batch found with available stock');
         }
 
-        // Check if we have enough total stock across all batches
         const totalAvailable = batches.reduce((sum, b) => sum + b.quantityOnHand, 0);
-        console.log(`[DEBUG] Total available across all valid batches: ${totalAvailable}`);
 
         if (totalAvailable < quantity) {
           throw new BadRequestException(`Insufficient stock. You requested ${quantity}, but only have ${totalAvailable} available.`);
@@ -56,21 +40,17 @@ async create(createDto: CreateTransactionDto, userId: string) {
         let remainingToIssue = quantity;
         const transactionsToLog: any[] = [];
 
-        // Loop through batches and drain them in order
         for (const batch of batches) {
-          if (remainingToIssue <= 0) break; // Stop when we've fulfilled the request
+          if (remainingToIssue <= 0) break;
 
           const deductQty = Math.min(batch.quantityOnHand, remainingToIssue);
-          console.log(`[DEBUG] Deducting ${deductQty} from batch ${batch.batchCode}`);
-          
           batch.quantityOnHand -= deductQty;
           remainingToIssue -= deductQty;
 
           await batch.save();
 
-          // Log an audit trail for EACH batch we touched
           transactionsToLog.push({
-            itemId: objectIdItemId, // 👈 Save as ObjectId
+            itemId: objectIdItemId,
             batchId: batch._id,
             type: 'ISSUE',
             quantity: deductQty,
@@ -79,13 +59,10 @@ async create(createDto: CreateTransactionDto, userId: string) {
           });
         }
 
-        // Save all the transaction logs and return
         const savedTransactions = await this.transactionModel.insertMany(transactionsToLog);
-        console.log('--- 🔍 TRANSACTION DEBUG END ---\n');
         return savedTransactions;
       }
 
-      // ─── 2. RECEIVE & MANUAL ADJUSTMENT LOGIC ───────────────────────────────
       let batch;
 
       if (type === 'RECEIVE') {
@@ -94,7 +71,7 @@ async create(createDto: CreateTransactionDto, userId: string) {
         }
 
         batch = await this.batchModel.findOne({ 
-          itemId: objectIdItemId, // 👈 Query with ObjectId
+          itemId: objectIdItemId,
           batchCode: batchLotNumber 
         });
         
@@ -102,7 +79,7 @@ async create(createDto: CreateTransactionDto, userId: string) {
           if (!supplierId) throw new BadRequestException('Supplier is required to create a new batch');
 
           batch = await this.batchModel.create({
-            itemId: objectIdItemId, // 👈 Save as ObjectId
+            itemId: objectIdItemId,
             batchCode: batchLotNumber,
             expiryDate: new Date(expiryDate),
             quantityOnHand: 0,
@@ -111,62 +88,49 @@ async create(createDto: CreateTransactionDto, userId: string) {
         }
       } 
       else {
-        // This is a manual ADJUSTMENT
         if (batchId) {
-          // If the frontend passed a specific batch (e.g. from an item detail page), use it
           batch = await this.batchModel.findById(batchId);
           if (!batch) throw new BadRequestException('Target batch not found');
         } else {
-          // AUTO-PILOT: The frontend didn't pass a batch, so we find one automatically.
-          // We look for the oldest expiring batch that actually has stock.
           const batches = await this.batchModel
             .find({ itemId: objectIdItemId, quantityOnHand: { $gt: 0 } })
             .sort({ expiryDate: 1 });
             
           if (batches.length === 0) {
-            throw new BadRequestException(
-              'No active batches found for this item. If you are trying to add brand new stock, please use "Receive Stock" instead.'
-            );
+            throw new BadRequestException('No active batches found for this item.');
           }
           
-          // Grab the first available batch
           batch = batches[0]; 
         }
       }
 
-      // Apply the math
       if (type === 'RECEIVE') {
         batch.quantityOnHand += quantity;
-      }else if (type === 'ADJUSTMENT') {
+      } else if (type === 'ADJUSTMENT') {
         if (!reason) throw new BadRequestException('Reason required for adjustments');
         
         if (batch.quantityOnHand + quantity < 0) {
-          throw new BadRequestException(
-            `Adjustment failed. This specific batch only has ${batch.quantityOnHand} units available.`
-          );
+          throw new BadRequestException(`Adjustment failed. This specific batch only has ${batch.quantityOnHand} units available.`);
         }
         
-        batch.quantityOnHand += quantity; // UI can send negative quantity for deductions
+        batch.quantityOnHand += quantity;
       }
 
       await batch.save();
 
-      // Log single transaction
       const savedTx = await this.transactionModel.create({
         ...createDto,
-        itemId: objectIdItemId, // 👈 Overwrite the string itemId from createDto with the true ObjectId!
+        itemId: objectIdItemId,
         batchId: batch._id,
         performedBy: userId,
       });
 
-      console.log('--- 🔍 TRANSACTION DEBUG END ---\n');
       return savedTx;
 
     } catch (error: any) {
-      console.error("🔥 TRANSACTION FAILED 🔥:", error.message || error);
       throw error; 
     }
-}
+  }
 
   async findAll() {
     return this.transactionModel.find()
@@ -175,53 +139,159 @@ async create(createDto: CreateTransactionDto, userId: string) {
       .exec();
   }
 
-  // ─── SEEDER FOR AI FORECASTING ────────────────────────────────────────────
-  async seedHistoricalData() {
-    console.log('Seeding historical transactions for AI...');
-    
-    // Grab all current batches so we have valid Item IDs and Batch IDs
-    const activeBatches = await this.batchModel.find().exec();
-    if (activeBatches.length === 0) {
-      throw new BadRequestException('No inventory found. Please import inventory first!');
-    }
+  async importFromBuffer(buffer: Buffer, userId: string) {
+    try {
+      const workbook = XLSX.read(buffer, { type: 'buffer' });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rawData = XLSX.utils.sheet_to_json(worksheet);
 
-    const transactionsToInsert: any[] = [];
+      let successCount = 0;
+      let errorCount = 0;
+      const errors: string[] = [];
 
-    // Loop through every batch in your database
-    for (const batch of activeBatches) {
-      // Go back 90 days in time
-      for (let i = 0; i < 90; i++) {
+      for (let i = 0; i < rawData.length; i++) {
+        const row: any = rawData[i];
         
-        // 40% chance of making a sale on any given day for this item
-        if (Math.random() < 0.40) {
-          const pastDate = new Date();
-          pastDate.setDate(pastDate.getDate() - i); // Subtract 'i' days from today
+        try {
+          const itemCode = row['Item Code'];
+          const type = row['Type']?.toString().toUpperCase();
+          const quantity = parseInt(row['Quantity'], 10);
+          const reason = row['Reason'];
 
-          // Randomize quantity sold (1 to 4 units)
-          const qty = Math.floor(Math.random() * 4) + 1;
+          if (!itemCode || !type || isNaN(quantity)) {
+            throw new Error('Missing required fields: Item Code, Type, or valid Quantity');
+          }
 
-          transactionsToInsert.push({
-            itemId: batch.itemId,
-            batchId: batch._id,
-            type: 'ISSUE',
-            quantity: qty,
-            reason: 'Simulated Historical FEFO Sale',
-            performedBy: 'AI Seeder Script',
-            createdAt: pastDate, // Forcing the past date!
-            updatedAt: pastDate,
-          });
+          const item = await this.itemModel.findOne({ itemCode: String(itemCode) });
+          if (!item) {
+            throw new Error(`Item not found: ${itemCode}`);
+          }
+
+          const dto: any = {
+            itemId: item._id.toString(),
+            type,
+            quantity,
+            reason: reason || 'Bulk Import',
+          };
+
+          if (type === 'RECEIVE') {
+            const batchCode = row['Batch Code'];
+            const supplierEmail = row['Supplier Email'];
+            const expiryRaw = row['Expiry Date'];
+
+            if (!batchCode || !supplierEmail || !expiryRaw) {
+              throw new Error('RECEIVE transactions require Batch Code, Supplier Email, and Expiry Date');
+            }
+
+            const supplier = await this.supplierModel.findOne({ email: supplierEmail });
+            if (!supplier) {
+              throw new Error(`Supplier not found: ${supplierEmail}`);
+            }
+
+            let finalExpiryDate: Date;
+            if (typeof expiryRaw === 'number') {
+              finalExpiryDate = new Date(Math.round((expiryRaw - 25569) * 86400 * 1000));
+            } else {
+              finalExpiryDate = new Date(expiryRaw);
+            }
+
+            dto.batchLotNumber = String(batchCode);
+            dto.supplierId = supplier._id.toString();
+            dto.expiryDate = finalExpiryDate;
+          } else {
+            const batchCode = row['Batch Code'];
+            if (batchCode) {
+              const batch = await this.batchModel.findOne({ 
+                itemId: item._id, 
+                batchCode: String(batchCode) 
+              });
+              if (batch) {
+                dto.batchId = batch._id.toString();
+              }
+            }
+          }
+
+          await this.create(dto, userId);
+          successCount++;
+        } catch (error: any) {
+          errorCount++;
+          errors.push(`Row ${i + 2}: ${error.message}`);
         }
       }
-    }
 
-    // Use native MongoDB insert to bypass Mongoose's automatic timestamp overwrite
-    if (transactionsToInsert.length > 0) {
-      await this.transactionModel.collection.insertMany(transactionsToInsert);
-    }
+      if (successCount === 0 && errorCount > 0) {
+        throw new BadRequestException(`Import failed completely. Errors: ${errors.join(' | ')}`);
+      }
 
-    return { 
-      success: true, 
-      message: `Successfully injected ${transactionsToInsert.length} historical 'ISSUE' transactions across 90 days. Your AI is ready!` 
-    };
+      return { 
+        success: true, 
+        message: `Imported ${successCount} transactions. ${errorCount > 0 ? `Failed ${errorCount} rows. Errors: ${errors.join(' | ')}` : ''}`
+      };
+
+    } catch (error: any) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException('Failed to process file. Ensure it is a valid Excel or CSV.');
+    }
   }
+
+async seedHistoricalTransactions() {
+  console.log('🌱 Starting HIGH-DENSITY Historical Data Seeder...');
+  
+  const items = await this.itemModel.find().exec();
+  if (items.length === 0) return { message: 'No items found.' };
+
+  await this.transactionModel.deleteMany({ performedBy: 'AI Seeder Script' });
+
+  const transactionsToInsert: any[] = [];
+  const today = new Date();
+
+  // Poisson generator helper
+  const getPoisson = (lambda: number) => {
+    let L = Math.exp(-lambda), k = 0, p = 1;
+    do { k++; p *= Math.random(); } while (p > L);
+    return k - 1;
+  };
+
+  for (const item of items) {
+    const cat = item.category;
+    
+    // Assign a "Velocity" (lambda) based on category
+    // This ensures demand is NOT 0 every day
+    let lambda = 0.5; // Default slow
+    if (['Medication', 'Antibiotics'].includes(cat)) lambda = 3.0;
+    else if (cat === 'Vaccine') lambda = 2.0;
+    else if (cat === 'Supplement') lambda = 1.0;
+    else if (cat === 'Treatment') lambda = 0.8;
+
+    for (let i = 180; i >= 0; i--) {
+      // Poisson generates a number of sales for this day (usually > 0)
+      const qty = getPoisson(lambda);
+      
+      if (qty > 0) {
+        const txDate = new Date(today);
+        txDate.setDate(today.getDate() - i);
+        txDate.setHours(9 + Math.floor(Math.random() * 8)); 
+
+        transactionsToInsert.push({
+          itemId: item._id,
+          type: 'ISSUE', 
+          quantity: qty, 
+          reason: 'Seeded historical transaction', 
+          performedBy: 'AI Seeder Script', 
+          createdAt: txDate,
+          updatedAt: txDate,
+        });
+      }
+    }
+  }
+
+  if (transactionsToInsert.length > 0) {
+    await this.transactionModel.collection.insertMany(transactionsToInsert); 
+  }
+
+  console.log(`✅ Seeded ${transactionsToInsert.length} high-density transactions.`);
+  return { message: `Seeded ${transactionsToInsert.length} transactions.` };
+}
+
+  
 }
