@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Types } from 'mongoose';
 
 @Schema({ timestamps: true })
 export class Supplier extends Document {
@@ -32,6 +32,9 @@ export class Supplier extends Document {
 
   @Prop({ default: 0 })
   totalOrdersReceived!: number;
+
+  @Prop({ type: [Types.ObjectId], ref: 'InventoryItem', default: [] })
+  inventoryItemIds?: Types.ObjectId[];
 }
 
 export const SupplierSchema = SchemaFactory.createForClass(Supplier);

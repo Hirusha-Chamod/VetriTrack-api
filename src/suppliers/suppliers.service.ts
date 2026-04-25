@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { Supplier } from './schema/supplier.schema';
@@ -13,7 +13,8 @@ export class SuppliersService {
   ) {}
 
   async create(dto: CreateSupplierDto) {
-    // Check for both name AND email to prevent duplicates
+    // Check for both name AND email to prevent duplicate
+    console.log("Attempting to create supplier with name:", dto);
     const existing = await this.supplierModel.findOne({
       $or: [{ supplierName: dto.supplierName }, { email: dto.email }]
     });
@@ -23,8 +24,28 @@ export class SuppliersService {
     return await this.supplierModel.create(dto);
   }
 
-  async findAll() {
-    return await this.supplierModel.find().sort({ supplierName: 1 }).exec();
+  async findAll(inventoryItemIds?: string | string[]) {
+    const filter: any = {};
+
+    if (inventoryItemIds) {
+      const ids = Array.isArray(inventoryItemIds)
+        ? inventoryItemIds
+        : inventoryItemIds.split(',');
+
+      const normalizedIds = ids
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0);
+
+      try {
+        if (normalizedIds.length > 0) {
+          filter.inventoryItemIds = { $in: normalizedIds.map((id) => new Types.ObjectId(id)) };
+        }
+      } catch (err) {
+        throw new BadRequestException('inventoryItemIds must be valid Mongo ObjectId values');
+      }
+    }
+
+    return await this.supplierModel.find(filter).sort({ supplierName: 1 }).exec();
   }
 
   async findOne(id: string) {

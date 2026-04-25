@@ -18,11 +18,18 @@ export class TransactionsService {
   ) {}
 
   async create(createDto: CreateTransactionDto, userId: string) {
+    console.log('--- STARTING TRANSACTION CREATION ---');
+    console.log('1. Incoming Payload:', createDto);
+    console.log('2. User ID:', userId);
+
     try {
       const { itemId, batchId, quantity, type, batchLotNumber, expiryDate, supplierId, reason } = createDto;
+      
+      console.log('3. Converting Item ID to ObjectId:', itemId);
       const objectIdItemId = new Types.ObjectId(itemId);
       
       if (type === 'ISSUE' && !batchId) {
+        console.log('4a. Processing ISSUE without specific batch...');
         const batches = await this.batchModel
           .find({ itemId: objectIdItemId, quantityOnHand: { $gt: 0 } })
           .sort({ expiryDate: 1 });
@@ -59,6 +66,7 @@ export class TransactionsService {
           });
         }
 
+        console.log('4b. Inserting multiple issue transactions:', transactionsToLog);
         const savedTransactions = await this.transactionModel.insertMany(transactionsToLog);
         return savedTransactions;
       }
@@ -66,28 +74,43 @@ export class TransactionsService {
       let batch;
 
       if (type === 'RECEIVE') {
+        console.log('4c. Processing RECEIVE transaction...');
+        
         if (!batchLotNumber || !expiryDate) {
+          console.error('ERROR: Missing batchLotNumber or expiryDate');
           throw new BadRequestException('Batch number and expiry date are required to receive stock');
         }
 
+        console.log(`5. Looking for existing batch with code: ${batchLotNumber}`);
         batch = await this.batchModel.findOne({ 
           itemId: objectIdItemId,
           batchCode: batchLotNumber 
         });
         
         if (!batch) {
-          if (!supplierId) throw new BadRequestException('Supplier is required to create a new batch');
+          console.log('6a. Batch not found. Creating a new one...');
+          if (!supplierId) {
+            console.error('ERROR: Missing supplierId for new batch');
+            throw new BadRequestException('Supplier is required to create a new batch');
+          }
 
-          batch = await this.batchModel.create({
+          const newBatchData = {
             itemId: objectIdItemId,
             batchCode: batchLotNumber,
             expiryDate: new Date(expiryDate),
             quantityOnHand: 0,
-            supplier: supplierId,
-          });
+            supplier: supplierId, // 👈 Make sure your StockBatch schema expects 'supplier' (not 'supplierId')
+          };
+          console.log('6b. New Batch Data:', newBatchData);
+          
+          batch = await this.batchModel.create(newBatchData);
+          console.log('6c. Successfully created new batch:', batch._id);
+        } else {
+          console.log('6a. Found existing batch:', batch._id);
         }
       } 
       else {
+        console.log('4d. Processing ADJUSTMENT or manual ISSUE...');
         if (batchId) {
           batch = await this.batchModel.findById(batchId);
           if (!batch) throw new BadRequestException('Target batch not found');
@@ -104,6 +127,7 @@ export class TransactionsService {
         }
       }
 
+      console.log(`7. Updating batch quantity. Current: ${batch.quantityOnHand}, Modifier: ${quantity}`);
       if (type === 'RECEIVE') {
         batch.quantityOnHand += quantity;
       } else if (type === 'ADJUSTMENT') {
@@ -117,18 +141,34 @@ export class TransactionsService {
       }
 
       await batch.save();
+      console.log('8. Batch saved successfully. Quantity is now:', batch.quantityOnHand);
 
-      const savedTx = await this.transactionModel.create({
+      const txData = {
         ...createDto,
         itemId: objectIdItemId,
         batchId: batch._id,
         performedBy: userId,
-      });
-
+      };
+      
+      console.log('9. Creating final transaction record:', txData);
+      const savedTx = await this.transactionModel.create(txData);
+      
+      console.log('--- TRANSACTION CREATION COMPLETE ---');
       return savedTx;
 
     } catch (error: any) {
-      throw error; 
+      // 👇 THIS IS THE MOST IMPORTANT LOG. It will reveal the Mongoose Validation Error.
+      console.error('\n❌ --- TRANSACTION FAILED --- ❌');
+      console.error('Error Message:', error.message);
+      console.error('Error Stack/Details:', error);
+      console.error('---------------------------------\n');
+      
+      if (error instanceof BadRequestException) {
+        throw error; 
+      }
+      
+      // Throw a specific error so the frontend sees it instead of a generic 500
+      throw new BadRequestException(error.message || 'Transaction failed due to server error'); 
     }
   }
 
@@ -234,64 +274,84 @@ export class TransactionsService {
     }
   }
 
-async seedHistoricalTransactions() {
-  console.log('🌱 Starting HIGH-DENSITY Historical Data Seeder...');
-  
-  const items = await this.itemModel.find().exec();
-  if (items.length === 0) return { message: 'No items found.' };
-
-  await this.transactionModel.deleteMany({ performedBy: 'AI Seeder Script' });
-
-  const transactionsToInsert: any[] = [];
-  const today = new Date();
-
-  // Poisson generator helper
-  const getPoisson = (lambda: number) => {
-    let L = Math.exp(-lambda), k = 0, p = 1;
-    do { k++; p *= Math.random(); } while (p > L);
-    return k - 1;
-  };
-
-  for (const item of items) {
-    const cat = item.category;
+  async seedHistoricalTransactions() {
+    console.log('🌱 Starting Dynamic Seeder with Real Suppliers and Reasons...');
     
-    // Assign a "Velocity" (lambda) based on category
-    // This ensures demand is NOT 0 every day
-    let lambda = 0.5; // Default slow
-    if (['Medication', 'Antibiotics'].includes(cat)) lambda = 3.0;
-    else if (cat === 'Vaccine') lambda = 2.0;
-    else if (cat === 'Supplement') lambda = 1.0;
-    else if (cat === 'Treatment') lambda = 0.8;
+    const items = await this.itemModel.find().exec();
+    if (items.length === 0) return { message: 'No items found.' };
 
-    for (let i = 180; i >= 0; i--) {
-      // Poisson generates a number of sales for this day (usually > 0)
-      const qty = getPoisson(lambda);
-      
-      if (qty > 0) {
+    const suppliers = await this.supplierModel.find().exec();
+    const supplierNames = suppliers.map(s => s.supplierName);
+    const supplierIds = suppliers.map(s => s._id);
+
+    await this.transactionModel.deleteMany({ reason: { $in: ['Historical Issue', 'Inventory Replenishment'] } });
+
+    const transactionsToInsert: any[] = [];
+    const today = new Date();
+
+    const getPoisson = (lambda: number) => {
+      let L = Math.exp(-lambda), k = 0, p = 1;
+      do { k++; p *= Math.random(); } while (p > L);
+      return k - 1;
+    };
+
+    const issueReasons = [
+      "Routine clinical usage", 
+      "Emergency medical procedure", 
+      "Batch dispensing for inpatient", 
+      "Pharmacy retail sale"
+    ];
+
+    for (const item of items) {
+      const cat = item.category;
+      let baseLambda = ['Medication', 'Antibiotics'].includes(cat) ? 4.0 : 1.5;
+      const trendMultiplier = Math.random() > 0.5 ? 1.2 : 0.8;
+
+      for (let i = 180; i >= 0; i--) {
         const txDate = new Date(today);
         txDate.setDate(today.getDate() - i);
-        txDate.setHours(9 + Math.floor(Math.random() * 8)); 
+        txDate.setHours(9 + Math.floor(Math.random() * 8));
 
-        transactionsToInsert.push({
-          itemId: item._id,
-          type: 'ISSUE', 
-          quantity: qty, 
-          reason: 'Seeded historical transaction', 
-          performedBy: 'AI Seeder Script', 
-          createdAt: txDate,
-          updatedAt: txDate,
-        });
+        let dailyLambda = baseLambda;
+        if (i <= 30) {
+          const progress = (30 - i) / 30;
+          dailyLambda = baseLambda * (1 + (trendMultiplier - 1) * progress);
+        }
+
+        const qty = getPoisson(dailyLambda);
+        if (qty > 0) {
+          transactionsToInsert.push({
+            itemId: item._id,
+            type: 'ISSUE',
+            quantity: qty,
+            reason: issueReasons[Math.floor(Math.random() * issueReasons.length)],
+            performedBy: 'Automated System', 
+            createdAt: txDate,
+            updatedAt: txDate,
+          });
+        }
+
+        if (i > 0 && i % 30 === 0) {
+          const sIndex = Math.floor(Math.random() * suppliers.length);
+          transactionsToInsert.push({
+            itemId: item._id,
+            type: 'RECEIVE',
+            quantity: Math.ceil(baseLambda * 40),
+            supplierId: supplierIds[sIndex],
+            reason: `Regular stock replenishment from ${supplierNames[sIndex]}`,
+            performedBy: supplierNames[sIndex], 
+            createdAt: txDate,
+            updatedAt: txDate,
+          });
+        }
       }
     }
+
+    if (transactionsToInsert.length > 0) {
+      await this.transactionModel.collection.insertMany(transactionsToInsert);
+    }
+
+    console.log(`✅ Seeded ${transactionsToInsert.length} transactions.`);
+    return { message: `Seeded ${transactionsToInsert.length} transactions.` };
   }
-
-  if (transactionsToInsert.length > 0) {
-    await this.transactionModel.collection.insertMany(transactionsToInsert); 
-  }
-
-  console.log(`✅ Seeded ${transactionsToInsert.length} high-density transactions.`);
-  return { message: `Seeded ${transactionsToInsert.length} transactions.` };
-}
-
-  
 }

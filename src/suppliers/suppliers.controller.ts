@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, BadRequestException, UploadedFile, UseInterceptors, Res } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, BadRequestException, UploadedFile, UseInterceptors, Res } from '@nestjs/common';
 import { SuppliersService } from './suppliers.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
@@ -22,8 +22,8 @@ export class SuppliersController {
 
   @Get()
   @Roles('owner', 'staff')
-  findAll() {
-    return this.suppliersService.findAll();
+  findAll(@Query('inventoryItemIds') inventoryItemIds?: string | string[]) {
+    return this.suppliersService.findAll(inventoryItemIds);
   }
 
   // ─── EXPORT ENDPOINT ──────────────────────────────────────────────────────

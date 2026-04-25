@@ -1,4 +1,4 @@
-import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { ArrayUnique, IsArray, IsEmail, IsEnum, IsMongoId, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class CreateSupplierDto {
   @IsNotEmpty()
@@ -31,4 +31,10 @@ export class CreateSupplierDto {
   @IsString()
   @IsOptional()
   leadTimeNotes?: string;
+
+  @IsArray()
+  @ArrayUnique()
+  @IsMongoId({ each: true })
+  @IsOptional()
+  inventoryItemIds?: string[];
 }

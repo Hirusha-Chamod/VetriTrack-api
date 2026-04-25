@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Query, UseGuards, Delete } from '@nestjs/common';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { AddPoItemDto } from './dto/add-po-item.dto';
 import { AuthGuard } from '@nestjs/passport';
@@ -11,50 +11,69 @@ import { RolesGuard } from 'src/auth/guards/roles.guard';
 export class PurchaseOrdersController {
   constructor(private readonly poService: PurchaseOrdersService) {}
 
-  // Step 1: Initialize a new Draft PO - Owner only
   @Post('draft')
-   @Roles('owner', 'staff')
+  @Roles('owner', 'staff')
   createDraft(@Body() createPoDto: CreatePoDto) {
     return this.poService.createDraft(createPoDto);
   }
 
-  // Step 2 & 3: Add items to the draft - Owner only
   @Patch('draft/:id/add-item')
-   @Roles('owner', 'staff')
+  @Roles('owner', 'staff')
   addItem(@Param('id') id: string, @Body() addItemDto: AddPoItemDto) {
     return this.poService.addItemToDraft(id, addItemDto);
   }
 
-  // Gets all drafts (grouped for the "Draft POs" screen) - Owner only
+  // 👇 NEW: Remove a specific item from a Draft PO
+  @Delete('draft/:id/remove-item/:itemId')
+  @Roles('owner', 'staff')
+  removeItemFromDraft(
+    @Param('id') id: string, 
+    @Param('itemId') itemId: string
+  ) {
+    return this.poService.removeItemFromDraft(id, itemId);
+  }
+
+  // 👇 NEW: Delete a Draft PO completely
+  @Delete('draft/:id')
+  @Roles('owner', 'staff')
+  deleteDraft(@Param('id') id: string) {
+    return this.poService.deleteDraft(id);
+  }
+
   @Get('drafts')
-   @Roles('owner', 'staff')
+  @Roles('owner', 'staff')
   getDrafts() {
     return this.poService.findDrafts();
   }
 
-  // Main list for the "Purchase Orders" screen (supports ?status=Sent) - Owner only
   @Get()
-   @Roles('owner', 'staff')
+  @Roles('owner', 'staff')
   findAll(@Query('status') status?: string) {
     return this.poService.findAll(status);
   }
 
-  // Updates status (e.g., clicking "Send" in the UI) - Owner only
   @Patch(':id/status')
-   @Roles('owner', 'staff')
+  @Roles('owner', 'staff')
   updateStatus(@Param('id') id: string, @Body('status') status: string) {
     return this.poService.updateStatus(id, status);
   }
 
-  // Called when stock actually arrives at the clinic - Owner and Staff
   @Patch(':id/receive')
   @Roles('owner', 'staff')
   receiveItems(
     @Param('id') id: string,
     @Body('itemId') itemId: string,
     @Body('quantity') quantity: number,
+    @Body('discountType') discountType?: 'Percentage' | 'Value' | 'None',
+    @Body('discountValue') discountValue?: number,
   ) {
-    return this.poService.receiveItems(id, itemId, quantity);
+    return this.poService.receiveItems(
+      id, 
+      itemId, 
+      quantity, 
+      discountType, 
+      discountValue
+    );
   }
 
   @Post(':id/remind')
