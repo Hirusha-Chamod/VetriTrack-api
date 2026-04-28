@@ -9,6 +9,11 @@ import { LoginDto } from './dto/login.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { MailerService } from '@nestjs-modules/mailer';
 
+/**
+ * Identity and Access Management (IAM) Engine.
+ * Handles user lifecycle, cryptographic password validation, JWT issuance, 
+ * and secure account recovery workflows.
+ */
 @Injectable()
 export class AuthService {
   constructor(
@@ -17,10 +22,17 @@ export class AuthService {
     private mailerService: MailerService,
   ) {}
 
+  // ============================================================================
+  // CORE AUTHENTICATION (SIGNUP & LOGIN)
+  // ============================================================================
+
   async signUp(signUpDto: SignUpDto): Promise<{ message: string }> {
-    
     const { fullName, username, email, password, role, avatarUrl } = signUpDto;
 
+    /*
+     * Step 1: Uniqueness Verification
+     * Ensure neither the username nor email is already claimed in the system.
+     */
     const userExists = await this.userModel.findOne({ 
       $or: [{ username }, { email }] 
     });
@@ -29,8 +41,16 @@ export class AuthService {
       throw new ConflictException('Username or Email already taken');
     }
 
+    /*
+     * Step 2: Cryptographic Security
+     * Salt and hash the password using bcrypt (Cost factor: 10) before touching the database.
+     */
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    /*
+     * Step 3: Account Provisioning
+     * Create the user record and explicitly set the account status to 'active'.
+     */
     await this.userModel.create({
       fullName,
       username,
@@ -47,20 +67,36 @@ export class AuthService {
   async login(loginDto: LoginDto): Promise<{ accessToken: string; user: { id: string; username: string; role: string; avatarUrl?: string } }> {
     const { username, password } = loginDto;
 
+    /*
+     * Step 1: Account Validation
+     * Fetch the user and explicitly request the hidden password field for comparison.
+     * Also checks if the account has been soft-deleted or suspended ('inactive').
+     */
     const user = await this.userModel.findOne({ username }).select('+password');
     
     if (!user || user.status === 'inactive') {
       throw new UnauthorizedException('Invalid credentials or account disabled');
     }
 
+    /*
+     * Step 2: Cryptographic Verification
+     */
     const isPasswordMatched = await bcrypt.compare(password, user.password);
     if (!isPasswordMatched) {
       throw new UnauthorizedException('Invalid password');
     }
 
+    /*
+     * Step 3: Audit Trail Update
+     * Stamp the last login time for security monitoring and inactive-account pruning.
+     */
     user.lastLogin = new Date();
     await user.save();
 
+    /*
+     * Step 4: Token Issuance
+     * Generate a stateless JWT containing the user's identity and RBAC role.
+     */
     const token = this.jwtService.sign({ id: user._id, role: user.role });
 
     return { 
@@ -74,7 +110,12 @@ export class AuthService {
     }
   }
 
+  // ============================================================================
+  // USER MANAGEMENT
+  // ============================================================================
+
   async getAllUsers(): Promise<User[]> {
+    // Strip out password hashes from the payload to prevent accidental leakage
     const users = await this.userModel.find().select('-password');
     return users;
   }
@@ -90,7 +131,6 @@ export class AuthService {
   }
 
   async updateUser(id: string, updateUserDto: UpdateUserDto): Promise<User> {
-    // 👇 Extract avatarUrl
     const { fullName, email, role, password, avatarUrl } = updateUserDto;
 
     const user = await this.userModel.findById(id);
@@ -99,6 +139,8 @@ export class AuthService {
       throw new NotFoundException('User not found');
     }
 
+    // Step 1: Email Collision Prevention
+    // If updating the email, ensure the new email isn't owned by another user.
     if (email) {
       const existingUser = await this.userModel.findOne({ email, _id: { $ne: id } });
       if (existingUser) {
@@ -107,21 +149,14 @@ export class AuthService {
       user.email = email;
     }
 
-    if (fullName) {
-      user.fullName = fullName;
-    }
+    if (fullName) user.fullName = fullName;
+    if (role) user.role = role;
+    if (avatarUrl) user.avatarUrl = avatarUrl;
 
-    if (role) {
-      user.role = role;
-    }
-
+    // Step 2: Conditional Cryptography
+    // Only re-hash if the user explicitly provided a new password in the payload.
     if (password) {
       user.password = await bcrypt.hash(password, 10);
-    }
-
-    
-    if (avatarUrl) {
-      user.avatarUrl = avatarUrl;
     }
 
     await user.save();
@@ -129,31 +164,12 @@ export class AuthService {
     return updatedUser!;
   }
 
-  async forgotPassword(email: string): Promise<{ message: string }> {
-    const user = await this.userModel.findOne({ email });
-    if (!user) {
-      return { message: 'If that email exists, an OTP has been sent.' };
-    }
-
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    
-    const expires = new Date();
-    expires.setMinutes(expires.getMinutes() + 15);
-
-    user.resetPasswordOtp = otp;
-    user.resetPasswordExpires = expires;
-    await user.save();
-
-    this.mailerService.sendMail({
-      to: user.email,
-      subject: 'VetriTrack - Password Reset Verification Code',
-      text: `Hello ${user.fullName},\n\nWe received a request to reset your VetriTrack password.\n\nYour 6-digit verification code is: ${otp}\n\nThis code will expire in 15 minutes.\n\nIf you did not request a password reset, please ignore this email or contact your administrator.\n\nThank you,\nVetriTrack Security`,
-    }).catch(err => console.error('Failed to send OTP email in background:', err));
-
-    return { message: 'If that email exists, an OTP has been sent.' };
-  }
-
   async deactivateUser(id: string): Promise<{ message: string }> {
+    /*
+     * Security Strategy: Soft Deletion
+     * We mark the user as 'inactive' rather than deleting the DB row. 
+     * This preserves historical referential integrity (e.g., knowing who approved an old PO).
+     */
     const user = await this.userModel.findById(id);
 
     if (!user) {
@@ -166,7 +182,52 @@ export class AuthService {
     return { message: 'User deactivated successfully' };
   }
 
+  // ============================================================================
+  // PASSWORD RECOVERY WORKFLOW (OTP)
+  // ============================================================================
+
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    const user = await this.userModel.findOne({ email });
+    
+    /*
+     * Step 1: Anti-Enumeration Defense
+     * Always return the exact same success message whether the email exists or not. 
+     * This prevents malicious actors from probing the API to guess registered emails.
+     */
+    if (!user) {
+      return { message: 'If that email exists, an OTP has been sent.' };
+    }
+
+    /*
+     * Step 2: Generate Time-Bound OTP
+     * Create a 6-digit code strictly valid for a 15-minute sliding window.
+     */
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    const expires = new Date();
+    expires.setMinutes(expires.getMinutes() + 15);
+
+    user.resetPasswordOtp = otp;
+    user.resetPasswordExpires = expires;
+    await user.save();
+
+    /*
+     * Step 3: Out-of-band Communication
+     * Dispatch the email asynchronously so the HTTP request doesn't hang.
+     */
+    this.mailerService.sendMail({
+      to: user.email,
+      subject: 'VetriTrack - Password Reset Verification Code',
+      text: `Hello ${user.fullName},\n\nWe received a request to reset your VetriTrack password.\n\nYour 6-digit verification code is: ${otp}\n\nThis code will expire in 15 minutes.\n\nIf you did not request a password reset, please ignore this email or contact your administrator.\n\nThank you,\nVetriTrack Security`,
+    }).catch(err => console.error('Failed to send OTP email in background:', err));
+
+    return { message: 'If that email exists, an OTP has been sent.' };
+  }
+
   async verifyOtp(email: string, otp: string): Promise<{ isValid: boolean; message: string }> {
+    /*
+     * Step 1: Validates that the OTP matches AND the expiration window hasn't elapsed.
+     */
     const user = await this.userModel.findOne({
       email,
       resetPasswordOtp: otp,
@@ -181,6 +242,9 @@ export class AuthService {
   }
 
   async resetPassword(email: string, otp: string, newPassword: string): Promise<{ message: string }> {
+    /*
+     * Step 1: Re-verify OTP integrity right before the final password change.
+     */
     const user = await this.userModel.findOne({
       email,
       resetPasswordOtp: otp,
@@ -191,6 +255,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid or expired OTP');
     }
 
+    /*
+     * Step 2: Apply Cryptography & Cleanup
+     * Hash the new password, then immediately destroy the OTP payload so it cannot be reused.
+     */
     user.password = await bcrypt.hash(newPassword, 10);
     
     user.resetPasswordOtp = undefined;

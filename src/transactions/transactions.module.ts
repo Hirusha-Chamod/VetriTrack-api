@@ -7,6 +7,7 @@ import { Transaction, TransactionSchema } from './schemas/transaction.schema';
 import { StockBatch, StockBatchSchema } from '../inventory/schemas/stock-batch.schema';
 import { InventoryItem, InventoryItemSchema } from '../inventory/schemas/inventory-item.schema';
 import { Supplier, SupplierSchema } from '../suppliers/schema/supplier.schema';
+import { User, UserSchema } from 'src/auth/schemas/user.schema';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { Supplier, SupplierSchema } from '../suppliers/schema/supplier.schema';
       { name: StockBatch.name, schema: StockBatchSchema },
       { name: InventoryItem.name, schema: InventoryItemSchema },
       { name: Supplier.name, schema: SupplierSchema },
+      { name: User.name, schema: UserSchema },
     ]),
     InventoryModule, 
   ],

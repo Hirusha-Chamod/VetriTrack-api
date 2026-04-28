@@ -7,6 +7,11 @@ import { Supplier } from '../suppliers/schema/supplier.schema';
 import { AddPoItemDto } from './dto/add-po-item.dto';
 import { CreatePoDto } from './dto/create-po.dto';
 
+/**
+ * Service responsible for managing the complete lifecycle of Procurement.
+ * Handles Draft creation, financial rollups, automated supplier communications, 
+ * and continuous KPI tracking (e.g., supplier lead times).
+ */
 @Injectable()
 export class PurchaseOrdersService {
   constructor(
@@ -15,10 +20,16 @@ export class PurchaseOrdersService {
     private readonly mailerService: MailerService, 
   ) {}
 
+  // ============================================================================
+  // DRAFT MANAGEMENT
+  // ============================================================================
+
   async createDraft(dto: CreatePoDto) {
+    /*
+     * Step 1: Generate a sequential, year-prefixed PO Number (e.g., PO-2026-001).
+     * We query the DB for the latest PO of the current year to prevent E11000 duplicate key errors.
+     */
     const year = new Date().getFullYear();
-    
-    // Find the latest PO created this year to prevent E11000 duplicate key errors
     const latestPo = await this.poModel
       .findOne({ poNumber: new RegExp(`^PO-${year}`) })
       .sort({ poNumber: -1 })
@@ -33,6 +44,7 @@ export class PurchaseOrdersService {
 
     const poNumber = `PO-${year}-${nextSequence.toString().padStart(3, '0')}`;
 
+    // Step 2: Initialize a clean draft with zeroed financial totals
     return await this.poModel.create({
       ...dto,
       poNumber,
@@ -42,21 +54,26 @@ export class PurchaseOrdersService {
     });
   }
 
-  // Smart Add: Merges quantities if item exists, otherwise adds new item
   async addItemToDraft(poId: string, itemDto: AddPoItemDto) {
+    /*
+     * Step 1: Validate PO State. Immutability check - items cannot be added once sent.
+     */
     const po = await this.poModel.findById(poId);
     if (!po) throw new NotFoundException('Purchase Order not found');
     if (po.status !== 'Draft') throw new BadRequestException('Cannot add items to a non-draft PO');
 
+    /*
+     * Step 2: Smart Merge Logic.
+     * If the item is already in the cart, increment the quantity rather than creating a duplicate line item.
+     */
     const objectId = new Types.ObjectId(itemDto.itemId);
     const existingItemIndex = po.items.findIndex(i => i.itemId.toString() === itemDto.itemId);
 
     if (existingItemIndex > -1) {
-       // Item already exists in this draft, just increment the quantity
        po.items[existingItemIndex].quantityRequested += itemDto.quantity;
        po.items[existingItemIndex].lineTotal = po.items[existingItemIndex].quantityRequested * po.items[existingItemIndex].unitPrice;
     } else {
-       // Push a completely new item
+       // Step 3: Append completely new item payload
        po.items.push({
          itemId: objectId, 
          quantityRequested: itemDto.quantity,
@@ -68,31 +85,29 @@ export class PurchaseOrdersService {
        } as any);
     }
 
-    // Recalculate root totals dynamically
+    // Step 4: Recalculate root financial rollups based on the modified line items
     po.totalValue = po.items.reduce((sum, i) => sum + (i.quantityRequested * i.unitPrice), 0);
     po.finalTotalValue = po.items.reduce((sum, i) => sum + i.lineTotal, 0);
     
     return await po.save();
   }
 
-  // NEW: Remove an item from a Draft PO
   async removeItemFromDraft(poId: string, itemId: string) {
     const po = await this.poModel.findById(poId);
     if (!po) throw new NotFoundException('Purchase Order not found');
     if (po.status !== 'Draft') throw new BadRequestException('Cannot remove items from a non-draft PO');
 
-    // Filter out the item
+    // Filter out the requested item and recalculate financials
     po.items = po.items.filter(i => i.itemId.toString() !== itemId);
 
-    // Recalculate root totals
     po.totalValue = po.items.reduce((sum, i) => sum + (i.quantityRequested * i.unitPrice), 0);
     po.finalTotalValue = po.items.reduce((sum, i) => sum + i.lineTotal, 0);
 
     return await po.save();
   }
 
-  // NEW: Delete a Draft PO entirely
   async deleteDraft(poId: string) {
+    // Safety safeguard: Prevent accidental deletion of historical/sent POs
     const po = await this.poModel.findById(poId);
     if (!po) throw new NotFoundException('Purchase Order not found');
     if (po.status !== 'Draft') throw new BadRequestException('Only Draft POs can be deleted');
@@ -101,6 +116,10 @@ export class PurchaseOrdersService {
     return { message: 'Draft PO successfully deleted' };
   }
 
+  // ============================================================================
+  // ORDER FULFILLMENT & FINANCIALS
+  // ============================================================================
+
   async receiveItems(
     poId: string, 
     itemId: string, 
@@ -108,16 +127,22 @@ export class PurchaseOrdersService {
     discountType?: 'Percentage' | 'Value' | 'None', 
     discountValue?: number
   ) {
+    /*
+     * Step 1: Validate entity existence and locate specific line item.
+     */
     const po = await this.poModel.findById(poId);
     if (!po) throw new NotFoundException('PO not found');
 
     const item = po.items.find((i) => i.itemId.toString() === itemId);
     if (!item) throw new NotFoundException('Item not found in this PO');
 
-    // Update quantity
+    // Step 2: Register incoming physical stock
     item.quantityReceived += qty;
 
-    // Apply ITEM-LEVEL Discount Logic
+    /*
+     * Step 3: Apply Item-Level Financial Discounts
+     * Suppliers often discount specific items (e.g., nearing expiry) rather than the whole PO.
+     */
     if (discountType && discountType !== 'None') {
       item.discountType = discountType;
       item.discountValue = discountValue || 0;
@@ -139,17 +164,27 @@ export class PurchaseOrdersService {
        item.lineTotal = item.quantityRequested * item.unitPrice;
     }
 
-    // Re-calculate the ROOT PO totals
+    /*
+     * Step 4: Roll up modified line totals to the root PO ledger.
+     */
     po.totalValue = po.items.reduce((sum, i) => sum + (i.quantityRequested * i.unitPrice), 0);
     po.finalTotalValue = po.items.reduce((sum, i) => sum + i.lineTotal, 0);
 
+    /*
+     * Step 5: Evaluate Fulfillment Status
+     * Transition seamlessly between 'Sent' -> 'Partial' -> 'Received' based on item-level ratios.
+     */
     const wasAlreadyReceived = po.status === 'Received';
     const allReceived = po.items.every(i => i.quantityReceived >= i.quantityRequested);
     const anyReceived = po.items.some(i => i.quantityReceived > 0);
     
     po.status = allReceived ? 'Received' : anyReceived ? 'Partial' : 'Sent';
 
-    // Automatic Lead Time Calculation
+    /*
+     * Step 6: Automated Supplier KPI Tracking (Lead Time)
+     * If the order is now fully received, dynamically recalculate the supplier's average delivery speed.
+     * This data feeds directly back into the AI reorder logic.
+     */
     if (po.status === 'Received' && !wasAlreadyReceived && po.sentAt) {
       const receivedAt = new Date();
       const diffTime = Math.abs(receivedAt.getTime() - po.sentAt.getTime());
@@ -160,6 +195,7 @@ export class PurchaseOrdersService {
         const currentAvg = supplier.averageLeadTimeDays || 0;
         const totalOrders = supplier.totalOrdersReceived || 0;
         
+        // Compute moving average
         const newTotalOrders = totalOrders + 1;
         const newAvg = ((currentAvg * totalOrders) + diffDays) / newTotalOrders;
 
@@ -173,6 +209,10 @@ export class PurchaseOrdersService {
 
     return await po.save();
   }
+
+  // ============================================================================
+  // QUERY & COMMUNICATION UTILITIES
+  // ============================================================================
 
   async findDrafts() {
     return await this.poModel
@@ -196,6 +236,7 @@ export class PurchaseOrdersService {
   async updateStatus(id: string, status: string) {
     const updateData: any = { status };
     
+    // Timestamp dispatch for lead-time tracking
     if (status === 'Sent') {
       updateData.sentAt = new Date();
     }
@@ -206,6 +247,7 @@ export class PurchaseOrdersService {
 
     if (!po) throw new NotFoundException('Purchase Order not found');
 
+    // Automatically dispatch email payload to supplier
     if (status === 'Sent') {
       const supplier: any = po.supplierId;
       this.mailerService.sendMail({
@@ -222,10 +264,12 @@ export class PurchaseOrdersService {
     const po = await this.poModel.findById(poId).populate('supplierId').populate('items.itemId');
     if (!po) throw new NotFoundException('PO not found');
     
+    // Step 1: Validate logical state (can't remind a supplier for an order we haven't sent)
     if (po.status !== 'Sent' && po.status !== 'Partial') {
       throw new BadRequestException(`Cannot send a reminder for a PO that is ${po.status}`);
     }
 
+    // Step 2: Anti-Spam Safeguard. Prevent staff from flooding the supplier's inbox.
     if (po.lastReminderSentAt) {
       const hoursSinceLastReminder = (new Date().getTime() - po.lastReminderSentAt.getTime()) / (1000 * 60 * 60);
       if (hoursSinceLastReminder < 24) {
@@ -233,6 +277,7 @@ export class PurchaseOrdersService {
       }
     }
 
+    // Step 3: Dispatch communication and stamp the audit log
     const supplier: any = po.supplierId;
     await this.mailerService.sendMail({
       to: supplier.email,
@@ -246,8 +291,4 @@ export class PurchaseOrdersService {
     po.lastReminderSentAt = new Date();
     return await po.save();
   }
-
-
-  
-  
 }
