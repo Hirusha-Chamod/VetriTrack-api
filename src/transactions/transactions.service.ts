@@ -404,4 +404,64 @@ export class TransactionsService {
     console.log(`✅ Seeded ${transactionsToInsert.length} transactions.`);
     return { message: `Seeded ${transactionsToInsert.length} transactions.` };
   }
+
+  /**
+   * Generates an Excel file containing all transaction history.
+   * Flattens populated relational data into a clean, human-readable spreadsheet.
+   */
+  async exportToExcel(): Promise<Buffer> {
+    // 1. Fetch all fully populated transactions
+    const transactions = await this.findAll();
+
+    // 2. Map complex nested objects into a flat, clean structure for Excel columns
+    const flatData = transactions.map((tx: any) => {
+      const item = tx.itemId || {};
+      const batch = tx.batchId || {};
+      const user = tx.performedBy || {};
+
+      // Handle the performedBy mapping safely (could be object or raw string)
+      const performedByName = typeof user === 'object' 
+        ? (user.fullName || user.username || 'Unknown User') 
+        : user;
+
+      const txDate = new Date(tx.createdAt);
+
+      return {
+        'Date': txDate.toLocaleDateString('en-GB'),
+        'Time': txDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+        'Transaction ID': tx._id.toString(),
+        'Type': tx.type,
+        'Item Code': item.itemCode || 'N/A',
+        'Item Name': item.itemName || 'Deleted Item',
+        'Batch Code': batch.batchCode || 'N/A',
+        'Quantity': tx.quantity,
+        'Reason': tx.reason || '',
+        'Performed By': performedByName,
+      };
+    });
+
+    // 3. Create a new workbook and worksheet
+    const worksheet = XLSX.utils.json_to_sheet(flatData);
+    const workbook = XLSX.utils.book_new();
+    
+    // Adjust column widths for better readability in Excel
+    worksheet['!cols'] = [
+      { wch: 12 }, // Date
+      { wch: 10 }, // Time
+      { wch: 26 }, // Transaction ID
+      { wch: 12 }, // Type
+      { wch: 15 }, // Item Code
+      { wch: 25 }, // Item Name
+      { wch: 15 }, // Batch Code
+      { wch: 10 }, // Quantity
+      { wch: 35 }, // Reason
+      { wch: 20 }, // Performed By
+    ];
+
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Transaction History');
+
+    // 4. Write to a binary buffer and return it
+    const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    return excelBuffer;
+  }
 }

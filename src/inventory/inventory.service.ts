@@ -165,6 +165,16 @@ async findAllItems(query: any = {}) {
     ]);
   }
 
+  async updateItem(id: string, dto: any) {
+    const item = await this.itemModel.findByIdAndUpdate(
+      id,
+      { $set: dto },
+      { new: true } // Returns the updated document
+    );
+    if (!item) throw new NotFoundException('Item not found');
+    return item;
+  }
+
   async getExpiryReport() {
     const today = new Date();
     

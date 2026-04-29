@@ -135,17 +135,20 @@ export class ForecastService {
   }
 
 
-  // ============================================================================
+ // ============================================================================
   // SINGLE CHART DATA: Granular timeline generation for the visual dashboard
   // ============================================================================
-  async getChartData(itemIdStr: string) {
-    const horizonDays = 30; // 30 days of history mapping for the chart
-
+ 
+  async getChartData(itemIdStr: string, requestedHorizon?: number) {
     // STEP 1: Validate the target item
     const item = await this.itemModel.findById(itemIdStr).lean();
     if (!item) {
       throw new NotFoundException('Inventory Item not found');
     }
+
+    
+    const settings = await this.settingsService.getSettings();
+    const horizonDays = requestedHorizon || settings.recommendationHorizonDays || 30;
 
     // STEP 2: Fetch consumption history specifically scoped to this item
     const historicalStartDate = new Date();
@@ -179,7 +182,6 @@ export class ForecastService {
     }
 
     // STEP 5: Construct the targeted payload. 
-    // We send an empty batch array because charting only cares about demand algorithms, not current expiry statuses.
     const payload = {
       itemCode: item.itemCode,
       itemName: item.itemName || 'Unknown',
@@ -192,16 +194,17 @@ export class ForecastService {
       forecastDate: new Date().toISOString().split('T')[0]
     };
 
-    // STEP 6: Execute request and handle strict debugging for the Data Science team
+    // STEP 6: Execute request and pass the dynamically calculated horizon
     try {
       const response = await firstValueFrom(
-        this.httpService.post(this.PYTHON_API_CHART_URL, payload)
+        this.httpService.post(this.PYTHON_API_CHART_URL, payload, {
+          params: { horizon_days: horizonDays } // 👈 Passes the correct dynamic horizon to Python
+        })
       );
       
       return response.data; 
       
     } catch (error: any) { 
-      // Diagnostic logging: Captures exactly why the Python model rejected the input
       console.error("FastAPI Error:", error.response?.data || error.message);
       throw new InternalServerErrorException('Forecasting chart engine is currently unavailable.');
     }

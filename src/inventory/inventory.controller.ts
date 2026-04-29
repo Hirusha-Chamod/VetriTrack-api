@@ -38,6 +38,15 @@ export class InventoryController {
     return this.inventoryService.addBatch(addBatchDto);
   }
 
+  @Patch('item/:id')
+  @Roles('owner')
+  updateItem(
+    @Param('id') id: string,
+    @Body() updateItemDto: any // You can replace 'any' with an UpdateItemDto if you have one!
+  ) {
+    return this.inventoryService.updateItem(id, updateItemDto);
+  }
+  
   @Get('items')
   @Roles('owner', 'staff')
   findAll(@Query() query: any) { 

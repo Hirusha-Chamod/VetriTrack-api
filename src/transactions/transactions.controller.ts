@@ -1,4 +1,16 @@
-import { Controller, Post, Body, Get, UseGuards, Req, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { 
+  Controller, 
+  Post, 
+  Body, 
+  Get, 
+  UseGuards, 
+  Req, 
+  Res, 
+  UseInterceptors, 
+  UploadedFile, 
+  BadRequestException 
+} from '@nestjs/common';
+import express from 'express'; 
 import { TransactionsService } from './transactions.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { AuthGuard } from '@nestjs/passport';
@@ -23,6 +35,32 @@ export class TransactionsController {
     return this.transactionsService.findAll();
   }
 
+
+  @Get('export/excel')
+  @Roles('owner', 'staff') 
+  async exportTransactions(@Res() res: express.Response) {
+    try {
+      const buffer = await this.transactionsService.exportToExcel();
+
+      // Get current date for a clean filename
+      const dateStr = new Date().toISOString().split('T')[0];
+      const filename = `Transactions_Export_${dateStr}.xlsx`;
+
+      // Set headers to force the browser/client to download the file
+      res.set({
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': buffer.length,
+      });
+
+      // Send the binary buffer
+      res.end(buffer);
+    } catch (error) {
+      console.error('Export Error:', error);
+      res.status(500).json({ message: 'Failed to generate export file' });
+    }
+  }
+
   @Post('import')
   @Roles('owner', 'staff')
   @UseInterceptors(FileInterceptor('file'))
@@ -34,7 +72,7 @@ export class TransactionsController {
   }
 
   @Get('seed')
-
+  @Roles('owner')
   seedHistoricalTransactions() {
     return this.transactionsService.seedHistoricalTransactions();
   }
